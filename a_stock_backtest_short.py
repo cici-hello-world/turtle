@@ -2,21 +2,22 @@ import tushare as ts
 import pandas as pd
 import numpy as np
 import os
-from datetime import datetime
+from exchange_calendars import get_calendar
+
 
 # ================= 配置区域 =================
 print(f"🚀 ================= 版本1================= ")
 
-# STOCK_CODE = "601138.SH"
-# STOCK_NAME = "工业富联"
-STOCK_CODE = "000625.SZ"
-STOCK_NAME = "长安汽车"
+STOCK_CODE = "601138.SH"
+STOCK_NAME = "工业富联"
+# STOCK_CODE = "000625.SZ"
+# STOCK_NAME = "长安汽车"
 TODAY = pd.Timestamp.today()
 YEARS = 8
 START_DATE = (TODAY - pd.DateOffset(years=YEARS)).strftime('%Y%m%d')
-# START_DATE = "20191228"
-# END_DATE = "20211228"
 END_DATE = TODAY.strftime('%Y%m%d')
+EXCHANGE = "SSE"        # A股上交所SSE / 深交所SZSE / 港股HKEX
+
 OUTPUT_DIR = "a_stock_backtest_short"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -30,10 +31,10 @@ def fetch_and_preprocess_data():
     token = os.environ.get("TUSHARE_TOKEN")
     if not token:
         raise RuntimeError("❌ 错误：未设置 TUSHARE_TOKEN 环境变量")
-    
+
     ts.set_token(token)
     pro = ts.pro_api()
-    
+
     print(f"🚀 开始获取 {STOCK_NAME} 数据...")
 
     # 1. 下载非复权日线
@@ -64,7 +65,19 @@ def fetch_and_preprocess_data():
     df['Date'] = pd.to_datetime(df['Date'])
     df = df[['Date', 'Open_QFQ', 'High_QFQ', 'Low_QFQ', 'Close_QFQ', 'vol', 'amount', 'adj_factor']]
     df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Amount', 'Adj_Factor']
-    
+
+    # 获取A股日历
+    hk_calendar = get_calendar(EXCHANGE)
+
+    # 计算交易日数
+    trading_days = hk_calendar.sessions_in_range(START_DATE, END_DATE)
+    trading_days_no_tz = trading_days.tz_localize(None)
+    print(f"A股交易日数：{len(trading_days)}")
+    if len(trading_days) != len(df):
+        missing_dates = trading_days_no_tz[~trading_days_no_tz.isin(df['Date'])]
+        print(f"✅ 数据有误：缺失共 {len(trading_days)-len(df)} 条记录")
+        print("缺失的日期如下：")
+        print(missing_dates.strftime('%Y-%m-%d').tolist())
     print(f"✅ 数据准备完成：共 {len(df)} 条记录")
     return df
 
@@ -73,18 +86,18 @@ def fetch_and_preprocess_data():
 def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period, initial_capital=100000.0, risk_per_trade=0.01):
     print(f"\n🔍 开始运行 {system_name} (带动态仓位管理)...")
     print(f"   初始资金：{initial_capital:,.2f} | 单笔风险：{risk_per_trade*100:.1f}%")
-    
+
     trades = []
     current_position = None
     entry_price = 0
     stop_loss_price = 0.0
     current_shares = 0
     entry_date = None
-    
+
     # 资金管理变量
     capital = initial_capital
     equity_curve = [initial_capital]
-    
+
     # 初始化指标
     df['TR'] = np.maximum(
         df['High'] - df['Low'],
@@ -97,16 +110,16 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
     df['HL_Exit'] = df['High'].rolling(window=exit_period).max().shift(1)
     df['LL_Exit'] = df['Low'].rolling(window=exit_period).min().shift(1)
     start_index = entry_period + 1
-    
+
     for i in range(start_index, len(df)):
         row = df.iloc[i]
         current_date = row['Date']
-        
+
         if current_position is None:
             #空仓
             if pd.isna(row['ATR']) or row['ATR'] == 0:
                 continue
-                
+
             atr = row['ATR']
             # 计算止损距离
             stop_dist = N_VALUE * atr
@@ -142,7 +155,7 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
             is_stopped = False
             exit_price = 0
             exit_reason = ""
-            
+
             if current_position == 'long':#已测试
                 # 优先检查硬止损/先实现方案一/方案二是当第一次出触发止损价则止损，需要拉取分时线数据
                 if row['Close'] < stop_loss_price:
@@ -238,7 +251,7 @@ def calc_stats_with_equity(trades, initial_capital, equity_curve):
             '总盈亏 (¥)': 0, '总收益率 (%)': 0, '最大回撤 (%)': 0,
             '最终资金 (¥)': initial_capital, '夏普比率': 0, '平均盈亏 (¥)': 0
         }
-    
+
     df_trades = pd.DataFrame(trades)
     df_trades = df_trades[df_trades['Reason'] != '强制平仓']
     wins = df_trades[df_trades['PnL_%'] > 0]
@@ -249,21 +262,21 @@ def calc_stats_with_equity(trades, initial_capital, equity_curve):
     win_count = len(wins)
     loss_count = len(losses)
     win_rate = (win_count / total_trades * 100) if total_trades > 0 else 0
-    
+
     total_pnl = final_capital - initial_capital
     total_return = (total_pnl / initial_capital) * 100
-    
+
     # 最大回撤 (基于 equity_curve)
     equity_series = pd.Series(equity_curve)
     cummax = equity_series.cummax()
     drawdown = (equity_series - cummax) / cummax
     max_dd = drawdown.min() * 100
-    
+
     # 平均盈亏
     avg_win = wins['PnL_¥'].mean() if win_count > 0 else 0
     avg_loss = abs(losses['PnL_¥'].mean()) if loss_count > 0 else 0
     win_loss_ratio = (avg_win / avg_loss) if avg_loss > 0 else 0
-    
+
     # 期望值
     expectation = (win_rate/100 * win_loss_ratio) - (100-win_rate)/100
     #平均每次交易期望收益？
@@ -280,7 +293,7 @@ def calc_stats_with_equity(trades, initial_capital, equity_curve):
             sharpe = 0
     else:
         sharpe = 0
-    
+
     return {
         '总交易': total_trades,
         '胜率 (%)': round(win_rate, 2),
@@ -302,24 +315,24 @@ def main():
     try:
         # 1. 获取数据
         df = fetch_and_preprocess_data()
-        
+
         # 2. 回测两个系统 (带仓位管理)
         trades_s1, equity_s1 = run_backtest_with_position_sizing(
             df, "System 1 (20/10+Stop)", 20, 10, INITIAL_CAPITAL, RISK_PERCENT/100
         )
-        
+
         #trades_s2, final_cap_s2, equity_s2 = run_backtest_with_position_sizing(
         #    df, "System 2 (55/10+Stop)", 55, 10, INITIAL_CAPITAL, RISK_PERCENT/100
         #)
-        
+
         # 3. 统计
         stats_s1 = calc_stats_with_equity(trades_s1, INITIAL_CAPITAL, equity_s1)
-        
+
         # 4. 打印结果
         print("\n" + "="*70)
         print("📊 海龟策略回测结果 (带动态仓位管理)")
         print("="*70)
-        
+
         print(f"   交易次数：{stats_s1['总交易']}")
         print(f"   胜率：{stats_s1['胜率 (%)']}%")
         print(f"   赔率：{stats_s1['赔率']}")
@@ -328,13 +341,13 @@ def main():
         print(f"   最大回撤：{stats_s1['最大回撤 (%)']}%")
         print(f"   最终资金：{stats_s1['最终资金 (¥)']:,.2f}¥")
         print(f"   夏普比率：{stats_s1['夏普比率']}")
-        
-        
+
+
         print("="*70)
-        
+
         # 5. 保存 Excel
         report_path = os.path.join(OUTPUT_DIR, f"Backtest_Report_{STOCK_CODE}_{START_DATE}起_{RISK_PERCENT}%单笔风险.xlsx")
-        
+
         with pd.ExcelWriter(report_path, engine='openpyxl') as writer:
             # Summary 表
             summary_data = [
@@ -351,27 +364,27 @@ def main():
                 ['夏普比率', stats_s1['夏普比率']]
             ]
             pd.DataFrame(summary_data[1:], columns=summary_data[0]).to_excel(writer, sheet_name='Summary', index=False)
-            
+
             # 日线原始数据
             df_to_export = df.copy()
             df_to_export['Date'] = df_to_export['Date'].dt.strftime('%Y-%m-%d')
             df_to_export.to_excel(writer, sheet_name='日线原始数据', index=False)
-            
+
             # System 1 交易明细
             if trades_s1:
                 df_trades_s1 = pd.DataFrame(trades_s1)
                 df_trades_s1['Entry Date'] = pd.to_datetime(df_trades_s1['Entry Date']).dt.strftime('%Y-%m-%d')
                 df_trades_s1['Exit Date'] = pd.to_datetime(df_trades_s1['Exit Date']).dt.strftime('%Y-%m-%d')
                 df_trades_s1.to_excel(writer, sheet_name='System 1 交易明细', index=False)
-            
-            
+
+
         print(f"\n✅ 报告已保存：{os.path.abspath(report_path)}")
         print(f"\n📁 Excel 文件包含以下工作表:")
         print(f"   1️⃣  Summary - 策略汇总统计 (含资金曲线指标)")
         print(f"   2️⃣   日线原始数据 - {len(df)} 条日线数据")
         if trades_s1:
             print(f"   3️⃣   System 1 交易明细 - {len(trades_s1)} 笔交易 (含股数/盈亏金额)")
-           
+
     except Exception as e:
         print(f"❌ 错误：{e}")
         import traceback
