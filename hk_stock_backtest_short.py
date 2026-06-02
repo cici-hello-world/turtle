@@ -7,20 +7,16 @@ from exchange_calendars import get_calendar
 # ================= 配置区域 =================
 print(f"🚀 ================= 版本4================= ")
 
-# STOCK_CODE = "09992.HK"
-# STOCK_NAME = "泡泡玛特"
+STOCK_CODE = "09992.HK"
+STOCK_NAME = "泡泡玛特"
 # STOCK_CODE = "02015.HK"
-# STOCK_NAME = "理想汽车"
-# STOCK_CODE = "03690.HK"
-# STOCK_NAME = "美团"
-STOCK_CODE = "01810.HK"
-STOCK_NAME = "小米"
+# STOCK_NAME = "理想汽车" #2021-08-12开市
 # STOCK_CODE = "06181.HK"
 # STOCK_NAME = "老铺黄金" 样本太少
 # STOCK_CODE = "00700.HK"
 # STOCK_NAME = "腾讯"
 TODAY = pd.Timestamp.today()
-YEARS = 8
+YEARS = 5
 START_DATE = (TODAY - pd.DateOffset(years=YEARS)).strftime('%Y%m%d')
 END_DATE = TODAY.strftime('%Y%m%d')
 
@@ -48,7 +44,7 @@ def fetch_and_preprocess_data():
     if df_daily.empty:
         raise ValueError("❌ 错误：未获取到日线数据")
     
-    # # 2. 下载复权因子
+    # 2. 下载复权因子
     # try:
     #     df_adj = pro.hk_adjfactor(ts_code=STOCK_CODE, start_date=START_DATE, end_date=END_DATE)
     # except Exception as e:

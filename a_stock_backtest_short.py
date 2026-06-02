@@ -8,10 +8,8 @@ from exchange_calendars import get_calendar
 # ================= 配置区域 =================
 print(f"🚀 ================= 版本1================= ")
 
-STOCK_CODE = "601138.SH"
-STOCK_NAME = "工业富联"
-# STOCK_CODE = "000625.SZ"
-# STOCK_NAME = "长安汽车"
+
+
 TODAY = pd.Timestamp.today()
 YEARS = 8
 START_DATE = (TODAY - pd.DateOffset(years=YEARS)).strftime('%Y%m%d')

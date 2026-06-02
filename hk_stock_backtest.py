@@ -2,28 +2,27 @@ import tushare as ts
 import pandas as pd
 import numpy as np
 import os
-from datetime import datetime
+from exchange_calendars import get_calendar
+
 
 # ================= 配置区域 =================
 print(f"🚀 ================= 版本2================= ")
-
+#'2023-09-01', '2023-09-08'受台风影响临时休市
 # STOCK_CODE = "09992.HK"
 # STOCK_NAME = "泡泡玛特"
 # STOCK_CODE = "02015.HK"
-# STOCK_NAME = "理想汽车" 考虑做空
+# STOCK_NAME = "理想汽车" #2021-08-12开市,不适合海龟
 # STOCK_CODE = "03690.HK"
-# STOCK_NAME = "美团" 考虑做空
+# STOCK_NAME = "美团" #2018-09-20开市
 # STOCK_CODE = "01810.HK"
-# STOCK_NAME = "小米"
+# STOCK_NAME = "小米" #2018-07-09开市
 # STOCK_CODE = "06181.HK"
 # STOCK_NAME = "老铺黄金" 样本太少
-STOCK_CODE = "00700.HK"
-STOCK_NAME = "腾讯"
+# STOCK_CODE = "00700.HK"
+# STOCK_NAME = "腾讯"
 TODAY = pd.Timestamp.today()
-YEARS = 10
+YEARS = 3
 START_DATE = (TODAY - pd.DateOffset(years=YEARS)).strftime('%Y%m%d')
-# START_DATE = "20191228"
-# END_DATE = "20211228"
 END_DATE = TODAY.strftime('%Y%m%d')
 OUTPUT_DIR = "hk_stock_backtest"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -31,7 +30,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 海龟策略参数
 N_VALUE = 2.0  # 止损倍数 (海龟标准)
 RISK_PERCENT = 1.0  # 单笔风险 1% (用于计算仓位)
-INITIAL_CAPITAL = 300000.0  # 初始资金 10 万元
+INITIAL_CAPITAL = 200000.0  # 初始资金 10 万元
 # ================= 1. 数据获取与处理 =================
 
 def fetch_and_preprocess_data():
@@ -73,6 +72,18 @@ def fetch_and_preprocess_data():
     df = df[['Date', 'Open_QFQ', 'High_QFQ', 'Low_QFQ', 'Close_QFQ', 'vol', 'amount', 'adj_factor']]
     df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Amount', 'Adj_Factor']
     
+    # 获取A股日历
+    hk_calendar = get_calendar(EXCHANGE)
+
+    # 计算交易日数
+    trading_days = hk_calendar.sessions_in_range(START_DATE, END_DATE)
+    trading_days_no_tz = trading_days.tz_localize(None)
+    print(f"A股交易日数：{len(trading_days)}")
+    if len(trading_days) != len(df):
+        missing_dates = trading_days_no_tz[~trading_days_no_tz.isin(df['Date'])]
+        print(f"✅ 数据有误：缺失共 {len(trading_days)-len(df)} 条记录")
+        print("缺失的日期如下：")
+        print(missing_dates.strftime('%Y-%m-%d').tolist())
     print(f"✅ 数据准备完成：共 {len(df)} 条记录")
     return df
 
@@ -112,6 +123,7 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
         current_date = row['Date']
         
         if current_position is None:
+            #空仓
             if pd.isna(row['ATR']) or row['ATR'] == 0:
                 continue
                 
@@ -122,13 +134,13 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
                 # 计算止损距离
                 stop_dist = N_VALUE * atr
                 target_risk_amount = capital * risk_per_trade
-                shares = int(target_risk_amount / stop_dist)
-                
+                # 入场shares手
+                shares = int(target_risk_amount / (stop_dist * 100))
                 if shares <= 0:
                     continue
                 
                 # 检查资金是否足够 (保留 5% 缓冲)
-                cost = row['Close'] * shares
+                cost = row['Close'] * shares * 100
                 if cost > capital * 0.95:
                     continue
                 
@@ -139,9 +151,10 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
                 entry_date = current_date
                 
                 capital -= cost
-                print(f"  🟢 [{system_name}] 做多入场：{row['Close']:.2f} | 股数：{shares} | 投入：{cost:.2f} | 剩余资金：{capital:.2f} | 止损：{stop_loss_price:.2f}")
+                print(f"  🟢 [{system_name}] 做多入场：{row['Close']:.2f} | 股数：{shares * 100} | 投入：{cost:.2f} | 剩余资金：{capital:.2f} | 止损：{stop_loss_price:.2f}")
                 
         else:
+            #持仓
             is_stopped = False
             exit_price = 0
             exit_reason = ""
@@ -150,21 +163,21 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
                 # 优先检查硬止损
                 if row['Close'] < stop_loss_price:
                     is_stopped = True
-                    exit_price = stop_loss_price
+                    exit_price = row['Close']#考虑滑点
                     exit_reason = "Hard Stop Loss (2×ATR)"
                 # 检查趋势反转
                 elif row['Close'] < row['LL_Exit']:
                     is_stopped = True
-                    exit_price = row['LL_Exit']
+                    exit_price = row['Close']#考虑滑点
                     exit_reason = "Trend Reversal (10d Low)"
             
             if is_stopped:
                 # 计算盈亏
-                pnl_amount = (exit_price - entry_price) * current_shares
-                sell_proceeds = exit_price * current_shares
+                pnl_amount = (exit_price - entry_price) * current_shares * 100
+                sell_proceeds = exit_price * current_shares * 100
                 capital += sell_proceeds
                 
-                pnl_pct = (pnl_amount / (entry_price * current_shares)) * 100
+                pnl_pct = (pnl_amount / (entry_price * current_shares * 100))
                 
                 trades.append({
                     'Entry Date': entry_date,
@@ -173,7 +186,7 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
                     'Entry Price': entry_price,
                     'Exit Price': exit_price,
                     'Shares': current_shares,
-                    'Cost_¥': entry_price * current_shares,
+                    'Cost_¥': entry_price * current_shares * 100,
                     'PnL_¥': pnl_amount,
                     'PnL_%': pnl_pct,
                     'Capital_After': capital,
@@ -195,8 +208,8 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
     if current_position == 'long':
         last_price = df.iloc[-1]['Close']
         last_date = df.iloc[-1]['Date']
-        pnl_amount = (last_price - entry_price) * current_shares
-        sell_proceeds = last_price * current_shares
+        pnl_amount = (last_price - entry_price) * current_shares * 100
+        sell_proceeds = last_price * current_shares * 100
         capital += sell_proceeds
         
         trades.append({
@@ -206,31 +219,32 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
             'Entry Price': entry_price,
             'Exit Price': last_price,
             'Shares': current_shares,
-            'Cost_¥': entry_price * current_shares,
+            'Cost_¥': entry_price * current_shares * 100,
             'PnL_¥': pnl_amount,
-            'PnL_%': (pnl_amount / (entry_price * current_shares)) * 100,
+            'PnL_%': (pnl_amount / (entry_price * current_shares * 100)) ,
             'Capital_After': capital,
             'Reason': "强制平仓"
         })
-        equity_curve.append(capital)
+        # equity_curve.append(capital)
         print(f"  ⚠️ [{system_name}] 强制平仓：{pnl_amount:,.2f}¥ | 最终资金：{capital:,.2f}")
-
-    return trades, capital, equity_curve
+    return trades, equity_curve
 
 # ================= 3. 统计计算 (基于资金曲线) =================
 
-def calc_stats_with_equity(trades, initial_capital, final_capital, equity_curve):
+def calc_stats_with_equity(trades, initial_capital, equity_curve):
     if not trades:
         return {
-            '总交易': 0, '胜率 (%)': 0, '赔率': 0, '盈利次数': 0, '亏损次数': 0,
+            '总交易': 0, '胜率 (%)': 0, '赔率': 0, '期望收益率':0, '盈利次数': 0, '亏损次数': 0,
             '总盈亏 (¥)': 0, '总收益率 (%)': 0, '最大回撤 (%)': 0,
             '最终资金 (¥)': initial_capital, '夏普比率': 0, '平均盈亏 (¥)': 0
         }
     
     df_trades = pd.DataFrame(trades)
+    df_trades = df_trades[df_trades['Reason'] != '强制平仓']
     wins = df_trades[df_trades['PnL_%'] > 0]
     losses = df_trades[df_trades['PnL_%'] < 0]
-    
+    final_capital = df_trades.iloc[-1]['Capital_After']
+    print(f"最终资金:{final_capital}")
     total_trades = len(df_trades)
     win_count = len(wins)
     loss_count = len(losses)
@@ -251,7 +265,9 @@ def calc_stats_with_equity(trades, initial_capital, final_capital, equity_curve)
     win_loss_ratio = (avg_win / avg_loss) if avg_loss > 0 else 0
     
     # 期望值
-    expectation = (win_rate/100 * avg_win) - ((100-win_rate)/100 * avg_loss)
+    expectation = (win_rate/100 * win_loss_ratio) - (100-win_rate)/100
+    #平均每次交易期望收益？
+    expectation1 = (win_rate / 100 * avg_win) - ((100 - win_rate) / 100 * avg_loss)
     
     # 夏普比率 (简化版：假设无风险利率为0，年化收益率/年化波动率)
     # 这里计算日收益率的夏普比率 (简化为：平均日收益 / 日收益标准差 * sqrt(252))
@@ -269,6 +285,7 @@ def calc_stats_with_equity(trades, initial_capital, final_capital, equity_curve)
         '总交易': total_trades,
         '胜率 (%)': round(win_rate, 2),
         '赔率': win_loss_ratio,
+        '期望收益率': expectation,
         '盈利次数': win_count,
         '亏损次数': loss_count,
         '总盈亏 (¥)': round(total_pnl, 2),
@@ -287,7 +304,7 @@ def main():
         df = fetch_and_preprocess_data()
         
         # 2. 回测两个系统 (带仓位管理)
-        trades_s1, final_cap_s1, equity_s1 = run_backtest_with_position_sizing(
+        trades_s1, equity_s1 = run_backtest_with_position_sizing(
             df, "System 1 (20/10+Stop)", 20, 10, INITIAL_CAPITAL, RISK_PERCENT/100
         )
         
@@ -296,7 +313,7 @@ def main():
         #)
         
         # 3. 统计
-        stats_s1 = calc_stats_with_equity(trades_s1, INITIAL_CAPITAL, final_cap_s1, equity_s1)
+        stats_s1 = calc_stats_with_equity(trades_s1, INITIAL_CAPITAL, equity_s1)
         
         # 4. 打印结果
         print("\n" + "="*70)
@@ -326,6 +343,7 @@ def main():
                 ['交易次数', stats_s1['总交易']],
                 ['胜率 (%)', stats_s1['胜率 (%)']],
                 ['赔率', stats_s1['赔率']],
+                ['期望收益率', stats_s1['期望收益率']],
                 ['总盈亏 (¥)', stats_s1['总盈亏 (¥)']],
                 ['总收益率 (%)', stats_s1['总收益率 (%)']],
                 ['最大回撤 (%)', stats_s1['最大回撤 (%)']],
