@@ -3,22 +3,36 @@ import pandas as pd
 import numpy as np
 import os
 from exchange_calendars import get_calendar
+from pandas import DataFrame
 
 # ================= 配置区域 =================
 print(f"🚀 ================= 版本4================= ")
 
-STOCK_CODE = "09992.HK"
-STOCK_NAME = "泡泡玛特"
-# STOCK_CODE = "02015.HK"
-# STOCK_NAME = "理想汽车" #2021-08-12开市
+# STOCK_CODE = "09992.HK"
+# STOCK_NAME = "泡泡玛特"
+STOCK_CODE = "02015.HK"
+STOCK_NAME = "理想汽车" #2021-08-12开市
 # STOCK_CODE = "06181.HK"
-# STOCK_NAME = "老铺黄金" 样本太少
+# STOCK_NAME = "老铺黄金" #20240628开市
 # STOCK_CODE = "00700.HK"
 # STOCK_NAME = "腾讯"
 TODAY = pd.Timestamp.today()
 YEARS = 5
 START_DATE = (TODAY - pd.DateOffset(years=YEARS)).strftime('%Y%m%d')
 END_DATE = TODAY.strftime('%Y%m%d')
+#泡泡玛特
+#EX_DATE = None    # 不分红的除净日为none
+# EX_DATE = "20260515"    # 泡泡玛特除净日
+# DIVIDEND = 2.7248       # 泡泡玛特每股分红 (HKD)
+#老铺
+# dividend_info = pd.DataFrame({
+#     'ex_date': ['20251120', '20260512'], # 假设未来还有几次分红
+#     'dividend': [10.52, 13.65]             # 对应的分红金额
+# })
+#
+# # 确保 ex_date 是字符串格式，方便后续匹配
+# dividend_info['ex_date'] = dividend_info['ex_date'].astype(str)
+dividend_info = None    # 不分红的除净日为none
 
 OUTPUT_DIR = "hk_stock_backtest_short"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -26,7 +40,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 海龟策略参数
 N_VALUE = 2.0  # 止损倍数 (海龟标准)
 RISK_PERCENT = 1.0  # 单笔风险 1% (用于计算仓位)
-INITIAL_CAPITAL = 200000.0  # 初始资金 10 万元
+INITIAL_CAPITAL = 1000000.0  # 初始资金 10 万元
 # ================= 1. 数据获取与处理 =================
 
 def fetch_and_preprocess_data():
@@ -54,6 +68,10 @@ def fetch_and_preprocess_data():
     # # 3. 合并与计算前复权
     # df = pd.merge(df_daily, df_adj, on='trade_date', how='inner')
     df = df_daily.sort_values('trade_date')
+
+    # 手动更新除权因子
+    if dividend_info is not None:
+        modify_adj_factor(df)
 
     # 前复权计算
     latest_factor = df['adj_factor'].iloc[-1]
@@ -83,6 +101,49 @@ def fetch_and_preprocess_data():
     print(f"✅ 数据准备完成：共 {len(df)} 条记录")
     return df
 
+
+def modify_adj_factor(df: DataFrame):
+    print(f"🚀 开始处理 {len(dividend_info)} 个除权事件...\n")
+
+    for idx, row in dividend_info.iterrows():
+        ex_date = row['ex_date']
+        dividend_amount = row['dividend']
+
+        print(f"🔍 处理除权日: {ex_date}, 分红: {dividend_amount} HKD")
+
+        # 1. 检查该日期是否在股价数据中
+        if ex_date not in df['trade_date'].values:
+            print(f"⚠️  警告：股价数据中未找到日期 {ex_date}，跳过。")
+            continue
+
+        # 2. 获取该除权日在股价数据中的索引
+        ex_idx = df[df['trade_date'] == ex_date].index[0]
+
+        # 3. 获取前一天收盘价 (使用稳健的布尔掩码法)
+        mask_prev = df['trade_date'] < ex_date
+        prev_row = df[mask_prev].iloc[-1]
+        prev_close = prev_row['close']
+
+        if prev_close > dividend_amount:
+            ex_price = prev_close - dividend_amount
+            ex_ratio = ex_price /prev_close
+            print(f"✅ 除权计算:")
+            print(f"   除权前收盘价: {prev_close:.2f} HKD")
+            print(f"   分红金额: {dividend_amount:.4f} HKD")
+            print(f"   除权参考价: {ex_price:.2f} HKD")
+            print(f"   调整系数 (Ex-Ratio): {ex_ratio:.6f}")
+
+            # 3. 修正因子
+            # 逻辑：Tushare 返回的 adj_factor 通常是“累计复权因子”，除权后因子应该变大
+            # 修正策略：将除权日之前的所有因子乘以 (Ex-Ratio)
+            mask_future = df.index > ex_idx
+            # 新因子 = 旧因子 * Ex-Ratio
+            df.loc[mask_future, 'adj_factor'] = df.loc[mask_future, 'adj_factor'] * ex_ratio
+            print(f"✅ 已修正 {mask_future.sum()} 条数据的复权因子 (乘以 {ex_ratio:.6f})")
+        else:
+            print(f"❌ 错误：除权前收盘价 ({prev_close}) 小于分红 ({dividend_amount})，数据异常！")
+
+
 # ================= 2. 海龟策略回测引擎 (带仓位管理) =================
 
 def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period, initial_capital=100000.0, risk_per_trade=0.01):
@@ -105,7 +166,8 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
         df['High'] - df['Low'],
         np.maximum(abs(df['High'] - df['Close'].shift(1)), abs(df['Low'] - df['Close'].shift(1)))
     )
-    df['ATR'] = df['TR'].ewm(span=14, min_periods=14).mean()
+    # df['ATR'] = df['TR'].ewm(span=14, min_periods=14).mean()
+    df['ATR'] = df['TR'].rolling(window=14, min_periods=14).mean()
 
     df['HH_Entry'] = df['High'].rolling(window=entry_period).max().shift(1)
     df['LL_Entry'] = df['Low'].rolling(window=entry_period).min().shift(1)

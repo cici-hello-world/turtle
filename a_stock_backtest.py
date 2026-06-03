@@ -8,9 +8,9 @@ from exchange_calendars import get_calendar
 # ================= 配置区域 =================
 print(f"🚀 ================= 版本9================= ")
 # STOCK_CODE = "002185.SZ"
-# STOCK_NAME = "华天科技" #数据改为mysql存储然后把数据库补数据之后，再从数据库拉取
-# STOCK_CODE = "601138.SH"
-# STOCK_NAME = "工业富联"
+# STOCK_NAME = "华天科技"
+STOCK_CODE = "601138.SH"
+STOCK_NAME = "工业富联"#2018-06-08上市
 # STOCK_CODE = "000625.SZ"
 # STOCK_NAME = "长安汽车"
 # STOCK_CODE = "600977.SH"
@@ -23,6 +23,8 @@ print(f"🚀 ================= 版本9================= ")
 # STOCK_NAME = "东方财富"
 # STOCK_CODE = "002475.SZ"
 # STOCK_NAME = "立讯精密"
+# STOCK_CODE = "002371.SZ"
+# STOCK_NAME = "北方华创"
 # STOCK_CODE = "002594.SZ"
 # STOCK_NAME = "比亚迪"
 # STOCK_CODE = "600036.SH"
@@ -128,8 +130,9 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
         df['High'] - df['Low'],
         np.maximum(abs(df['High'] - df['Close'].shift(1)), abs(df['Low'] - df['Close'].shift(1)))
     )
-    df['ATR'] = df['TR'].ewm(span=14, min_periods=14).mean()
-    
+    #df['ATR'] = df['TR'].ewm(span=14, min_periods=14).mean()
+    df['ATR'] = df['TR'].rolling(window=14, min_periods=14).mean()
+
     df['HH_Entry'] = df['High'].rolling(window=entry_period).max().shift(1)
     df['LL_Entry'] = df['Low'].rolling(window=entry_period).min().shift(1)
     df['HL_Exit'] = df['High'].rolling(window=exit_period).max().shift(1)
@@ -203,6 +206,7 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
                     'Exit Date': current_date,
                     'Type': 'Long',
                     'Entry Price': entry_price,
+                    '2ATR': stop_dist,
                     'Exit Price': exit_price,
                     'Shares': current_shares,
                     'Cost_¥': entry_price * current_shares * 100,
@@ -236,6 +240,7 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
             'Exit Date': last_date,
             'Type': 'Long',
             'Entry Price': entry_price,
+            '2ATR': stop_dist,
             'Exit Price': last_price,
             'Shares': current_shares,
             'Cost_¥': entry_price * current_shares * 100,
