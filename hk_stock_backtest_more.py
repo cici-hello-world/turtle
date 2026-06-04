@@ -6,51 +6,23 @@ from exchange_calendars import get_calendar
 from pandas import DataFrame
 
 
-# ================= 配置区域 =================
-print(f"🚀 ================= 版本3================= ")
-#'2023-09-01', '2023-09-08'受台风影响临时休市
-# STOCK_CODE = "09992.HK"
-# STOCK_NAME = "泡泡玛特"
-# STOCK_CODE = "02015.HK"
-# STOCK_NAME = "理想汽车" #2021-08-12开市,不适合海龟
-# STOCK_CODE = "03690.HK"
-# STOCK_NAME = "美团" #2018-09-20开市
-# STOCK_CODE = "01810.HK"
-# STOCK_NAME = "小米" #2018-07-09开市
-# STOCK_CODE = "06181.HK"
-# STOCK_NAME = "老铺黄金"
-STOCK_CODE = "00700.HK"
-STOCK_NAME = "腾讯"
+# ================= 配置区域默认值 =================
+
+STOCK_CODE = ""
+STOCK_NAME = ""
 PER_SHARES = 100
 TODAY = pd.Timestamp.today()
 YEARS = 8
 START_DATE = (TODAY - pd.DateOffset(years=YEARS)).strftime('%Y%m%d')
 END_DATE = TODAY.strftime('%Y%m%d')
-# #泡泡玛特
-# dividend_info = pd.DataFrame({
-#     'ex_date': ['20260515'], # 假设未来还有几次分红
-#     'dividend': [2.7248]             # 对应的分红金额
-# })
-#老铺
-# dividend_info = pd.DataFrame({
-#     'ex_date': ['20251120', '20260512'], # 假设未来还有几次分红
-#     'dividend': [10.52, 13.65]             # 对应的分红金额
-# })
-#腾讯
-dividend_info = pd.DataFrame({
-    'ex_date': ['20260515'], # 假设未来还有几次分红
-    'dividend': [5.3]             # 对应的分红金额
-})
-# # 确保 ex_date 是字符串格式，方便后续匹配
-dividend_info['ex_date'] = dividend_info['ex_date'].astype(str)
-#dividend_info = None    # 不分红的除净日为none
+dividend_info = None    # 不分红的除净日为none
 OUTPUT_DIR = "hk_stock_backtest_more"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # 海龟策略参数
 N_VALUE = 2.0  # 止损倍数 (海龟标准)
 RISK_PERCENT = 1.0  # 单笔风险 1% (用于计算仓位)
-INITIAL_CAPITAL = 400000.0  # 初始资金 10 万元
+INITIAL_CAPITAL = 200000.0  # 初始资金 10 万元
 # ================= 1. 数据获取与处理 =================
 
 def fetch_and_preprocess_data():
@@ -400,10 +372,7 @@ def main():
         trades_s1, equity_s1 = run_backtest_with_position_sizing(
             df, "System 1 (20/10+Stop)", 20, 10, INITIAL_CAPITAL, RISK_PERCENT/100
         )
-        
-        #trades_s2, final_cap_s2, equity_s2 = run_backtest_with_position_sizing(
-        #    df, "System 2 (55/10+Stop)", 55, 10, INITIAL_CAPITAL, RISK_PERCENT/100
-        #)
+
         
         # 3. 统计
         stats_s1 = calc_stats_with_equity(trades_s1, INITIAL_CAPITAL, equity_s1)
@@ -469,6 +438,3 @@ def main():
         print(f"❌ 错误：{e}")
         import traceback
         traceback.print_exc()
-
-if __name__ == "__main__":
-    main()
