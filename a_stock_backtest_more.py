@@ -41,6 +41,7 @@ STOCK_NAME = "工业富联"#2018-06-08上市
 # STOCK_NAME = "许继电气"
 # STOCK_CODE = "688981.SH"
 # STOCK_NAME = "中芯国际"
+PER_SHARES = 100
 TODAY = pd.Timestamp.today()
 YEARS = 8
 START_DATE = (TODAY - pd.DateOffset(years=YEARS)).strftime('%Y%m%d')
@@ -160,13 +161,13 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
                 stop_dist = N_VALUE * atr
                 target_risk_amount = capital * risk_per_trade
                 # 入场shares手
-                shares = int(target_risk_amount / (stop_dist * 100))
-                max_shares = shares * 8 #最大仓位
+                shares = int(target_risk_amount / (stop_dist * PER_SHARES))
+                max_shares = shares * 5 #最大仓位
                 if shares <= 0:
                     continue
                 
                 # 检查资金是否足够 (保留 5% 缓冲)
-                cost = row['Close'] * shares * 100
+                cost = row['Close'] * shares * PER_SHARES
                 if cost > capital * 0.8:
                     continue
                 
@@ -177,7 +178,7 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
                 entry_date = current_date
                 
                 capital -= cost
-                print(f"  🟢 [{system_name}] 做多入场：{row['Close']:.2f} | 股数：{shares * 100} | 投入：{cost:.2f} | 剩余资金：{capital:.2f} | 止损：{stop_loss_price:.2f}")
+                print(f"  🟢 [{system_name}] 做多入场：{row['Close']:.2f} | 股数：{shares * PER_SHARES} | 投入：{cost:.2f} | 剩余资金：{capital:.2f} | 止损：{stop_loss_price:.2f}")
                 
         else:
             #持仓
@@ -202,21 +203,21 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
                         # 加仓1个固定单位（和开仓股数相同）
                         more_price = row['Close']
                         stop_loss_price = more_price - stop_dist #止损价到底怎么确定的？
-                        if more_price * shares * 100 > capital * 0.8:
+                        if more_price * shares * PER_SHARES > capital * 0.8:
                             continue
                         current_shares += shares
-                        cost += more_price * shares * 100
-                        capital -= more_price * shares * 100
+                        cost += more_price * shares * PER_SHARES
+                        capital -= more_price * shares * PER_SHARES
                         more_info.append({
                             'More Price': more_price,
                             'More Date': current_date.strftime('%Y%m%d'),
                         })
                         print(
-                            f"  🟢 [{system_name}] 做多加仓：{more_price:.2f} | 股数：{shares * 100} | 投入：{(more_price * shares * 100):.2f} | 剩余资金：{capital:.2f} | 止损上移至：{stop_loss_price:.2f}")
+                            f"  🟢 [{system_name}] 做多加仓：{more_price:.2f} | 股数：{shares * PER_SHARES} | 投入：{(more_price * shares * PER_SHARES):.2f} | 剩余资金：{capital:.2f} | 止损上移至：{stop_loss_price:.2f}")
 
             if is_stopped:
                 # 计算盈亏
-                sell_proceeds = exit_price * current_shares * 100
+                sell_proceeds = exit_price * current_shares * PER_SHARES
                 pnl_amount = sell_proceeds - cost
 
                 capital += sell_proceeds
@@ -255,8 +256,8 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
     if current_position == 'long':
         last_price = df.iloc[-1]['Close']
         last_date = df.iloc[-1]['Date']
-        pnl_amount = (last_price - entry_price) * current_shares * 100
-        sell_proceeds = last_price * current_shares * 100
+        pnl_amount = (last_price - entry_price) * current_shares * PER_SHARES
+        sell_proceeds = last_price * current_shares * PER_SHARES
         capital += sell_proceeds
         
         trades.append({
@@ -268,9 +269,9 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
             '2ATR': stop_dist,
             'Exit Price': last_price,
             'Shares': current_shares,
-            'Cost_¥': entry_price * current_shares * 100,
+            'Cost_¥': entry_price * current_shares * PER_SHARES,
             'PnL_¥': pnl_amount,
-            'PnL_%': (pnl_amount / (entry_price * current_shares * 100)) ,
+            'PnL_%': (pnl_amount / (entry_price * current_shares * PER_SHARES)) ,
             'Capital_After': capital,
             'Reason': "强制平仓"
         })
