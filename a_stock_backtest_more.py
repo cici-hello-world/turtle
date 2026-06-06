@@ -8,39 +8,9 @@ from exchange_calendars import get_calendar
 
 
 # ================= 配置区域 =================
-print(f"🚀 ================= 版本9================= ")
-# STOCK_CODE = "002185.SZ"
-# STOCK_NAME = "华天科技"
-STOCK_CODE = "601138.SH"
-STOCK_NAME = "工业富联"#2018-06-08上市
-# STOCK_CODE = "000625.SZ"
-# STOCK_NAME = "长安汽车"
-# STOCK_CODE = "600977.SH"
-# STOCK_NAME = "中国电影" 不适合海龟策略
-# STOCK_CODE = "300308.SZ"
-# STOCK_NAME = "中际旭创"
-# STOCK_CODE = "002230"
-# STOCK_NAME = "科大讯飞"
-# STOCK_CODE = "300059.SZ"
-# STOCK_NAME = "东方财富"
-# STOCK_CODE = "002475.SZ"
-# STOCK_NAME = "立讯精密"
-# STOCK_CODE = "002371.SZ"
-# STOCK_NAME = "北方华创"
-# STOCK_CODE = "002594.SZ"
-# STOCK_NAME = "比亚迪"
-# STOCK_CODE = "600036.SH"
-# STOCK_NAME = "招商银行"
-# STOCK_CODE = "000625.SZ"
-# STOCK_NAME = "长安汽车"
-# STOCK_CODE = "601899.SH"
-# STOCK_NAME = "紫金矿业"
-# STOCK_CODE = "300001.SZ"
-# STOCK_NAME = "特锐德"
-# STOCK_CODE = "000400.SZ"
-# STOCK_NAME = "许继电气"
-# STOCK_CODE = "688981.SH"
-# STOCK_NAME = "中芯国际"
+
+STOCK_CODE = ""
+STOCK_NAME = ""
 PER_SHARES = 100
 TODAY = pd.Timestamp.today()
 YEARS = 8
@@ -197,7 +167,7 @@ def run_backtest_with_position_sizing(df, system_name, entry_period, exit_period
                     is_stopped = True
                     exit_price = row['Close']#考虑滑点
                     exit_reason = "Trend Reversal (10d Low)"
-                # 3.检查加仓条件：当前价 > 上次加仓价 + 0.5×ATR
+                # 3.检查加仓条件：当前价 > 入场价 + N*0.5×ATR
                 elif row['Close'] > (entry_price + (current_shares/shares) * 0.5 * atr):
                     if current_shares < max_shares:
                         # 加仓1个固定单位（和开仓股数相同）
@@ -357,10 +327,7 @@ def main():
         trades_s1, equity_s1 = run_backtest_with_position_sizing(
             df, "System 1 (20/10+Stop)", 20, 10, INITIAL_CAPITAL, RISK_PERCENT/100
         )
-        
-        #trades_s2, final_cap_s2, equity_s2 = run_backtest_with_position_sizing(
-        #    df, "System 2 (55/10+Stop)", 55, 10, INITIAL_CAPITAL, RISK_PERCENT/100
-        #)
+
         
         # 3. 统计
         stats_s1 = calc_stats_with_equity(trades_s1, INITIAL_CAPITAL, equity_s1)
@@ -426,6 +393,3 @@ def main():
         print(f"❌ 错误：{e}")
         import traceback
         traceback.print_exc()
-
-if __name__ == "__main__":
-    main()
