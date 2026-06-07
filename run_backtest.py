@@ -102,6 +102,7 @@ if __name__ == "__main__":
             "ex_date": ["20260515"],
             "dividend": [2.7248],
         }),
-        max_pyramid=5
+        max_pyramid=5,
+        skip_first_add = True
     )
     run(config)

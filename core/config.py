@@ -34,6 +34,7 @@ class BacktestConfig:
     # ========== 策略模式 ==========
     mode: str = "long"  # "long" | "long_more" | "both"
     max_pyramid: int = 5  # 最大加仓次数（仅 long_more）
+    skip_first_add: bool = False  # 跳过首次加仓，总加仓次数-1（仅 long_more）
 
     # ========== 输出 ==========
     output_dir: str = ""  # 留空自动推导
