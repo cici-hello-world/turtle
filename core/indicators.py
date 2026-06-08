@@ -9,10 +9,13 @@ def compute_indicators(
     entry_period: int = 20,
     exit_period: int = 10,
     atr_period: int = 14,
+    ema_fast: int = 40,
+    ema_slow: int = 200,
 ) -> pd.DataFrame:
     """在 DataFrame 上添加海龟策略所需指标列
 
-    添加的列: TR, ATR, HH_Entry, LL_Entry, HL_Exit, LL_Exit
+    添加的列: TR, ATR, HH_Entry, LL_Entry, HL_Exit, LL_Exit,
+              EMA_Fast, EMA_Slow (趋势过滤器)
     """
     df = df.copy()
 
@@ -33,5 +36,11 @@ def compute_indicators(
     df["LL_Entry"] = df["Low"].rolling(window=entry_period).min().shift(1)
     df["HL_Exit"] = df["High"].rolling(window=exit_period).max().shift(1)
     df["LL_Exit"] = df["Low"].rolling(window=exit_period).min().shift(1)
+
+    # EMA 趋势过滤器（0 表示禁用）
+    if ema_fast > 0:
+        df["EMA_Fast"] = df["Close"].ewm(span=ema_fast, adjust=False).mean()
+    if ema_slow > 0:
+        df["EMA_Slow"] = df["Close"].ewm(span=ema_slow, adjust=False).mean()
 
     return df

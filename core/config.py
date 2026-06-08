@@ -31,6 +31,11 @@ class BacktestConfig:
     risk_percent: float = 1.0  # 单笔风险 %
     initial_capital: float = 200000.0
 
+    # ========== EMA 趋势过滤器 ==========
+    ema_fast: int = 40   # 快线周期，0 表示禁用
+    ema_slow: int = 200  # 慢线周期，0 表示禁用
+    # 做多仅当 EMA_Fast > EMA_Slow（上升趋势），做空反之
+
     # ========== 策略模式 ==========
     mode: str = "long"  # "long" | "long_more" | "both"
     max_pyramid: int = 5  # 最大加仓次数（仅 long_more）

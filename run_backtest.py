@@ -42,6 +42,8 @@ def run(config: BacktestConfig):
             entry_period=config.entry_period,
             exit_period=config.exit_period,
             atr_period=config.atr_period,
+            ema_fast=config.ema_fast,
+            ema_slow=config.ema_slow,
         )
 
         # 3. 运行回测
@@ -103,6 +105,7 @@ if __name__ == "__main__":
             "dividend": [2.7248],
         }),
         max_pyramid=5,
+        ema_slow=150,
         skip_first_add = True
     )
     run(config)

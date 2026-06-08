@@ -18,6 +18,13 @@ def print_summary(stats: dict, config):
     print(f"   最大回撤：{stats['最大回撤 (%)']}%")
     print(f"   最终资金：{stats['最终资金 (¥)']:,.2f}¥")
     print(f"   夏普比率：{stats['夏普比率']}")
+    print(f"   CAGR (%)：{stats['CAGR (%)']}")
+    print(f"   MAR比率：{stats['MAR比率']}")
+    print(f"   衰落持续期 (天)：{stats['衰落持续期 (天)']}")
+    print(f"   回归年度回报率 (%)：{stats['回归年度回报率 (%)']}")
+    print(f"   R平方：{stats['R平方']}")
+    print(f"   R立方：{stats['R立方']}")
+    print(f"   稳健夏普比率：{stats['稳健夏普比率']}")
 
     print("=" * 70)
 
@@ -49,6 +56,13 @@ def save_excel_report(df: pd.DataFrame, trades: list[dict], stats: dict, config)
             ["最大回撤 (%)", stats["最大回撤 (%)"]],
             ["最终资金 (¥)", stats["最终资金 (¥)"]],
             ["夏普比率", stats["夏普比率"]],
+            ["CAGR (%)", stats["CAGR (%)"]],
+            ["MAR比率", stats["MAR比率"]],
+            ["衰落持续期 (天)", stats["衰落持续期 (天)"]],
+            ["回归年度回报率 (%)", stats["回归年度回报率 (%)"]],
+            ["R平方", stats["R平方"]],
+            ["R立方", stats["R立方"]],
+            ["稳健夏普比率", stats["稳健夏普比率"]],
         ]
         pd.DataFrame(summary_data[1:], columns=summary_data[0]).to_excel(
             writer, sheet_name="Summary", index=False

@@ -24,6 +24,22 @@ def run_backtest(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
 
 # ==================== 共享工具函数 ====================
 
+def _ema_trend_ok(row, config, direction: str = "long") -> bool:
+    """EMA 趋势过滤器。direction="long" 要求快线在慢线之上。"""
+    fast = config.ema_fast
+    slow = config.ema_slow
+    if fast <= 0 or slow <= 0:
+        return True  # 参数为 0 表示禁用过滤器
+    fast_val = row.get("EMA_Fast")
+    slow_val = row.get("EMA_Slow")
+    if pd.isna(fast_val) or pd.isna(slow_val):
+        return True  # 数据不足时不拦截
+    if direction == "long":
+        return fast_val > slow_val
+    else:
+        return fast_val < slow_val
+
+
 def _calc_shares(capital: float, risk_per_trade: float, stop_dist: float,
                  per_shares: int) -> int:
     """计算入场股数（手数），基于风险资金 / 止损距离"""
@@ -161,7 +177,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
             if shares <= 0:
                 continue
 
-            if row["Close"] > row["HH_Entry"]:
+            if row["Close"] > row["HH_Entry"] and _ema_trend_ok(row, config):
                 cost = row["Close"] * shares * ps
                 if not _can_afford(cost, capital):
                     continue
@@ -250,7 +266,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
             skip_offset = 1 if config.skip_first_add else 0
             max_shares = shares * (config.max_pyramid - skip_offset)
 
-            if row["Close"] > row["HH_Entry"]:
+            if row["Close"] > row["HH_Entry"] and _ema_trend_ok(row, config):
                 cost = row["Close"] * shares * ps
                 if not _can_afford(cost, capital):
                     continue
@@ -363,7 +379,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
 
             entry_price = row["Close"]
 
-            if row["Close"] > row["HH_Entry"]:
+            if row["Close"] > row["HH_Entry"] and _ema_trend_ok(row, config):
                 cost = entry_price * shares * PS
                 if cost > capital * 0.95:
                     continue
@@ -374,7 +390,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 capital -= cost
                 _print_entry(label, entry_price, shares * PS, cost, capital, stop_loss_price)
 
-            elif row["Close"] < row["LL_Entry"]:
+            elif row["Close"] < row["LL_Entry"] and _ema_trend_ok(row, config, "short"):
                 income = entry_price * shares * PS
                 pos = "short"
                 stop_loss_price = entry_price + stop_dist
