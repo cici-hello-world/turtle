@@ -89,29 +89,71 @@ def _build_trade(entry_date, exit_date, pos_type, entry_price, exit_price,
     return record
 
 
-def _check_long_exit(row, stop_loss_price):
+# ==================== 通道信号注册表（扩展新通道只需在此添加一项） ====================
+
+_CHANNEL = {
+    "donchian": {
+        "long_entry":  lambda row, cfg: row["Close"] > row["HH_Entry"],
+        "short_entry": lambda row, cfg: row["Close"] < row["LL_Entry"],
+        "long_exit":   lambda row, cfg: row["Close"] < row["LL_Exit"],
+        "short_exit":  lambda row, cfg: row["Close"] > row["HL_Exit"],
+        "long_exit_reason":  "Trend Reversal (10d Low)",
+        "short_exit_reason": "Trend Reversal (10d High)",
+    },
+    "bollinger": {
+        "long_entry":  lambda row, cfg: row["Close"] > row["BB_Upper"],
+        "short_entry": lambda row, cfg: row["Close"] < row["BB_Lower"],
+        "long_exit":   lambda row, cfg: row["Close"] < row["BB_Mid"],
+        "short_exit":  lambda row, cfg: row["Close"] > row["BB_Mid"],
+        "long_exit_reason":  "Trend Reversal (BB Mid)",
+        "short_exit_reason": "Trend Reversal (BB Mid)",
+    },
+}
+
+
+def _get_channel(config) -> dict:
+    """获取当前通道的信号定义"""
+    return _CHANNEL[config.channel_type]
+
+
+def _long_entry_triggered(row, config) -> bool:
+    """做多入场信号"""
+    return _get_channel(config)["long_entry"](row, config)
+
+
+def _short_entry_triggered(row, config) -> bool:
+    """做空入场信号"""
+    return _get_channel(config)["short_entry"](row, config)
+
+
+def _check_long_exit(row, stop_loss_price, config):
     """检查做多出场条件。返回 (exit_price, reason)；无信号返回 (None, '')。"""
+    # 止损（所有通道共用）
     if row["Close"] < stop_loss_price:
         return row["Close"], "Hard Stop Loss (2×ATR)"
-    if row["Close"] < row["LL_Exit"]:
-        return row["Close"], "Trend Reversal (10d Low)"
+    # 通道特定的趋势出场
+    ch = _get_channel(config)
+    if ch["long_exit"](row, config):
+        return row["Close"], ch["long_exit_reason"]
+    return None, ""
+
+def _check_short_exit(row, stop_loss_price, config):
+    """检查做多出场条件。返回 (exit_price, reason)；无信号返回 (None, '')。"""
+    # 止损（所有通道共用）
+    if row["Close"] > stop_loss_price:
+        return row["Close"], "Hard Stop Loss (2×ATR)"
+    ch = _get_channel(config)
+    if ch["short_exit"](row, config):
+        return row["Close"], ch["short_exit_reason"]
     return None, ""
 
 
-def _check_both_exit(row, pos, stop_loss_price):
+def _check_both_exit(row, pos, stop_loss_price, config):
     """检查双向出场条件。返回 (exit_price, reason)；无信号返回 (None, '')。"""
     if pos == "long":
-        if row["Close"] < stop_loss_price:
-            return row["Close"], "Hard Stop Loss (2×ATR)"
-        if row["Close"] < row["LL_Exit"]:
-            return row["Close"], "Trend Reversal (10d Low)"
+        return _check_long_exit(row, stop_loss_price, config)
     else:  # short
-        if row["Close"] > stop_loss_price:
-            return row["Close"], "Hard Stop Loss (2×ATR)"
-        if row["Close"] > row["HL_Exit"]:
-            return row["Close"], "Trend Reversal (10d High)"
-    return None, ""
-
+        return _check_short_exit(row, stop_loss_price, config)
 
 # ==================== 输出格式化 ====================
 
@@ -151,7 +193,7 @@ def _print_force_close(label, pnl, capital):
 # ==================== 不加仓做多 ====================
 
 def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
-    label = "System 1"
+    label = config.channel_type
     ps = config.per_shares
     _print_header(label, config.initial_capital, config.risk_percent)
 
@@ -177,7 +219,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
             if shares <= 0:
                 continue
 
-            if row["Close"] > row["HH_Entry"] and _ema_trend_ok(row, config):
+            if _long_entry_triggered(row, config) and _ema_trend_ok(row, config):
                 cost = row["Close"] * shares * ps
                 if not _can_afford(cost, capital):
                     continue
@@ -190,7 +232,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 _print_entry(label, row["Close"], shares * ps, cost, capital, stop_loss_price)
 
         else:
-            exit_price, exit_reason = _check_long_exit(row, stop_loss_price)
+            exit_price, exit_reason = _check_long_exit(row, stop_loss_price, config)
             if exit_reason:
                 cost_basis = entry_price * current_shares * ps
                 pnl = (exit_price - entry_price) * current_shares * ps
@@ -232,7 +274,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
 # ==================== 加仓做多（金字塔） ====================
 
 def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
-    label = "System 1"
+    label = config.channel_type
     ps = config.per_shares
     _print_header(label, config.initial_capital, config.risk_percent)
 
@@ -266,7 +308,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
             skip_offset = 1 if config.skip_first_add else 0
             max_shares = shares * (config.max_pyramid - skip_offset)
 
-            if row["Close"] > row["HH_Entry"] and _ema_trend_ok(row, config):
+            if _long_entry_triggered(row, config) and _ema_trend_ok(row, config):
                 cost = row["Close"] * shares * ps
                 if not _can_afford(cost, capital):
                     continue
@@ -281,7 +323,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
                 _print_entry(label, row["Close"], shares * ps, cost, capital, stop_loss_price)
 
         else:
-            exit_price, exit_reason = _check_long_exit(row, stop_loss_price)
+            exit_price, exit_reason = _check_long_exit(row, stop_loss_price, config)
 
             # 加仓（仅在未触发出场信号时检查，以入场 ATR 为基准）
             if not exit_reason and entry_atr > 0:
@@ -379,7 +421,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
 
             entry_price = row["Close"]
 
-            if row["Close"] > row["HH_Entry"] and _ema_trend_ok(row, config):
+            if _long_entry_triggered(row, config) and _ema_trend_ok(row, config):
                 cost = entry_price * shares * PS
                 if cost > capital * 0.95:
                     continue
@@ -390,7 +432,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 capital -= cost
                 _print_entry(label, entry_price, shares * PS, cost, capital, stop_loss_price)
 
-            elif row["Close"] < row["LL_Entry"] and _ema_trend_ok(row, config, "short"):
+            elif _short_entry_triggered(row, config) and _ema_trend_ok(row, config, "short"):
                 income = entry_price * shares * PS
                 pos = "short"
                 stop_loss_price = entry_price + stop_dist
@@ -400,7 +442,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 _print_short_entry(label, entry_price, shares * PS, income, capital, stop_loss_price)
 
         else:
-            exit_price, exit_reason = _check_both_exit(row, pos, stop_loss_price)
+            exit_price, exit_reason = _check_both_exit(row, pos, stop_loss_price, config)
             if exit_reason:
                 pnl = (exit_price - entry_price) * current_shares * PS
                 capital += exit_price * current_shares * PS

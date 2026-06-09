@@ -20,9 +20,6 @@ class BacktestConfig:
     exchange: str = ""  # 留空按 market 自动推导
     per_shares: int = 100  # 每手股数
 
-    # 港股分红（仅港股需要）
-    dividend_info: pd.DataFrame | None = None
-
     # ========== 策略参数 ==========
     entry_period: int = 20
     exit_period: int = 10
@@ -35,6 +32,11 @@ class BacktestConfig:
     ema_fast: int = 40   # 快线周期，0 表示禁用
     ema_slow: int = 200  # 慢线周期，0 表示禁用
     # 做多仅当 EMA_Fast > EMA_Slow（上升趋势），做空反之
+
+    # ========== 通道类型 ==========
+    channel_type: str = "donchian"  # "donchian" | "bollinger"
+    bb_period: int = 20             # 布林线周期（仅 bollinger）
+    bb_k: float = 2.0               # 布林线标准差倍数（仅 bollinger）
 
     # ========== 策略模式 ==========
     mode: str = "long"  # "long" | "long_more" | "both"
@@ -76,10 +78,6 @@ class BacktestConfig:
                     "both": "hk_stock_backtest_short",
                 }
             self.output_dir = suffix_map.get(self.mode, f"{self.market.lower()}_stock_backtest")
-
-        # 港股分红 DataFrame 预处理
-        if self.dividend_info is not None and "ex_date" in self.dividend_info.columns:
-            self.dividend_info["ex_date"] = self.dividend_info["ex_date"].astype(str)
 
     @property
     def risk_per_trade(self) -> float:

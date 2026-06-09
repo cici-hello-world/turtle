@@ -19,7 +19,6 @@ from core.indicators import compute_indicators
 from core.engine import run_backtest
 from core.statistics import calc_stats
 from core.reporter import print_summary, save_excel_report
-import pandas as pd
 
 
 def run(config: BacktestConfig):
@@ -33,7 +32,6 @@ def run(config: BacktestConfig):
             start_date=config.start_date,
             end_date=config.end_date,
             exchange=config.exchange,
-            dividend_info=config.dividend_info,
         )
 
         # 2. 计算指标
@@ -44,6 +42,9 @@ def run(config: BacktestConfig):
             atr_period=config.atr_period,
             ema_fast=config.ema_fast,
             ema_slow=config.ema_slow,
+            channel_type=config.channel_type,
+            bb_period=config.bb_period,
+            bb_k=config.bb_k,
         )
 
         # 3. 运行回测
@@ -73,12 +74,6 @@ if __name__ == "__main__":
     #     # ========== 回测周期 ==========
     #     years=8,
     #
-    #     # ========== 港股分红（仅港股） ==========
-    #     # dividend_info=pd.DataFrame({
-    #     #     "ex_date": ["20260515"],
-    #     #     "dividend": [2.7248],
-    #     # }),
-    #
     #     # ========== 策略模式 ==========
     #     mode="long",         # "long" | "long_more" | "both"
     #
@@ -93,19 +88,109 @@ if __name__ == "__main__":
     #     # max_pyramid=5,
     # )
     # ================ 泡泡玛特 ================
+    # config = BacktestConfig(
+    #     ts_code="09992.HK",
+    #     stock_name="泡泡玛特",
+    #     market="HK",
+    #     mode="long_more",
+    #     years=5,
+    #     per_shares=200,
+    #     max_pyramid=5,
+    #     ema_fast=50,
+    #     skip_first_add = True
+    # )
+    # config = BacktestConfig(
+    #     ts_code="300274.SZ",
+    #     stock_name="阳光电源",
+    #     market="A",
+    #     mode="long_more",
+    #     max_pyramid=5,
+    #     ema_slow=100,
+    #     ema_fast=50,
+    # )
+    # config = BacktestConfig(
+    #     ts_code="601012.SH",
+    #     stock_name="隆基绿能",
+    #     market="A",
+    #     mode="long_more",
+    #     max_pyramid=5,
+    #     ema_slow=100,
+    #     ema_fast=50,
+    # )
+    # config = BacktestConfig(
+    #     ts_code="00388.HK",
+    #     stock_name="香港交易所",
+    #     market="HK",
+    #     mode="long_more",
+    #     max_pyramid=5,
+    #     ema_fast=50
+    # )
+    # config = BacktestConfig(
+    #     ts_code="03690.HK",
+    #     stock_name="美团",  # 2018-09-20开市
+    #     market="HK",
+    #     mode="long_more",
+    #     max_pyramid=5,
+    #     ema_fast=50
+    # )
+    # config = BacktestConfig(
+    #     ts_code="03690.HK",
+    #     stock_name="美团",  # 2018-09-20开市
+    #     market="HK",
+    #     mode="long_more",
+    #     max_pyramid=5,
+    #     channel_type="bollinger"
+    # )
     config = BacktestConfig(
         ts_code="09992.HK",
         stock_name="泡泡玛特",
         market="HK",
-        mode="long_more",
+        mode="long",
         years=5,
         per_shares=200,
-        dividend_info=pd.DataFrame({
-            "ex_date": ["20260515"],
-            "dividend": [2.7248],
-        }),
         max_pyramid=5,
-        ema_slow=150,
-        skip_first_add = True
+        channel_type="bollinger",
+        bb_period=10,
+        bb_k=1,
     )
+    # config = BacktestConfig(
+    #     ts_code="00700.HK",
+    #     stock_name="腾讯",
+    #     market="HK",
+    #     mode="long_more",
+    #     initial_capital=200000.0,
+    #     max_pyramid=5,
+    #     channel_type="bollinger",
+    #     bb_period=10,
+    #     bb_k=1,
+    # )
+    # config = BacktestConfig(
+    #     ts_code="300750.SZ",
+    #     stock_name="宁德时代",
+    #     market="A",
+    #     mode="long_more",
+    #     max_pyramid=5,
+    #     channel_type="bollinger",
+    #     bb_period=10,
+    #     bb_k=1,
+    # )
+    # config = BacktestConfig(
+    #     ts_code="300502.SZ",
+    #     stock_name="新易盛",
+    #     market="A",
+    #     mode="long_more",
+    #     max_pyramid=5,
+    #     channel_type="bollinger",
+    #     bb_period=10,
+    #     bb_k=1,
+    # )
+
+    # config = BacktestConfig(
+    #     ts_code="01810.HK",
+    #     stock_name="小米",  # 2018-07-09开市
+    #     market="HK",
+    #     mode="long_more",
+    #     max_pyramid=5,
+    #     ema_fast=50
+    # )
     run(config)

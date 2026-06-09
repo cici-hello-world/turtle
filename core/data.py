@@ -1,14 +1,14 @@
 """数据获取与预处理 —— A股 / 港股统一入口"""
 
 import os
+import re
 import pandas as pd
 import tushare as ts
 from exchange_calendars import get_calendar
 
 
 def fetch_data(ts_code: str, stock_name: str, market: str,
-               start_date: str, end_date: str, exchange: str,
-               dividend_info: pd.DataFrame | None = None) -> pd.DataFrame:
+               start_date: str, end_date: str, exchange: str) -> pd.DataFrame:
     """获取并预处理股票数据，返回标准格式 DataFrame
 
     返回列: Date, Open, High, Low, Close, Volume, Amount, Adj_Factor
@@ -25,7 +25,7 @@ def fetch_data(ts_code: str, stock_name: str, market: str,
     if market == "A":
         df = _fetch_a_share(pro, ts_code, start_date, end_date)
     else:
-        df = _fetch_hk_share(pro, ts_code, start_date, end_date, dividend_info)
+        df = _fetch_hk_share(pro, ts_code, start_date, end_date)
 
     # 检查数据完整性
     _check_data_completeness(df, exchange, start_date, end_date)
@@ -55,9 +55,70 @@ def _fetch_a_share(pro, ts_code: str, start_date: str, end_date: str) -> pd.Data
     return _compute_qfq(df)
 
 
-def _fetch_hk_share(pro, ts_code: str, start_date: str, end_date: str,
-                    dividend_info: pd.DataFrame | None = None) -> pd.DataFrame:
-    """港股数据获取：hk_daily_adj → 可选分红除权修正 → 前复权"""
+def _parse_dividend_hkd(scheme: str) -> float | None:
+    """从 akshare 分红方案文本中提取港币每股现金分红"""
+    if not isinstance(scheme, str):
+        return None
+    m = re.search(r'相当于港币([\d.]+)元', scheme)
+    if m:
+        return float(m.group(1))
+    m = re.search(r'每股派港币([\d.]+)元', scheme)
+    if m:
+        return float(m.group(1))
+    return None
+
+
+def _get_missing_dividends(df: pd.DataFrame, ts_code: str,
+                           end_date: str) -> pd.DataFrame:
+    """对比 Tushare adj_factor 与 akshare 分红记录，返回缺失的除权事件"""
+    import akshare as ak
+
+    # Tushare adj_factor 最后变动日期
+    d = df.copy()
+    d["adj_diff"] = d["adj_factor"].diff().abs()
+    changes = d[d["adj_diff"] > 1e-8]
+    last_adj_date = (
+        str(changes["trade_date"].iloc[-1])[:10].replace("-", "")
+        if not changes.empty
+        else None
+    )
+
+    # akshare 分红
+    ak_code = ts_code.replace(".HK", "")
+    try:
+        div = ak.stock_hk_dividend_payout_em(symbol=ak_code)
+    except Exception:
+        return pd.DataFrame()
+
+    missing = []
+    for _, r in div.iterrows():
+        ex_date_str = str(r["除净日"]).replace("-", "")[:8]
+        scheme = str(r["分红方案"])
+
+        if ex_date_str > end_date:
+            continue
+        if "分派" in scheme and "每股派" not in scheme:
+            continue
+        if "送股" in scheme or "转股" in scheme:
+            continue
+
+        div_hkd = _parse_dividend_hkd(scheme)
+        if div_hkd is None or div_hkd <= 0:
+            continue
+
+        is_missing = (last_adj_date is None) or (ex_date_str > last_adj_date)
+        if is_missing:
+            missing.append({"ex_date": ex_date_str, "dividend": div_hkd})
+
+    if not missing:
+        return pd.DataFrame()
+
+    return pd.DataFrame(missing)
+
+
+def _fetch_hk_share(pro, ts_code: str, start_date: str,
+                    end_date: str) -> pd.DataFrame:
+    """港股数据获取：hk_daily_adj → akshare分红除权修正 → 前复权"""
     # 1. 下载复权日线
     df = pro.hk_daily_adj(ts_code=ts_code, start_date=start_date, end_date=end_date)
     if df.empty:
@@ -65,8 +126,9 @@ def _fetch_hk_share(pro, ts_code: str, start_date: str, end_date: str,
 
     df = df.sort_values("trade_date")
 
-    # 2. 手动修正分红除权因子
-    if dividend_info is not None:
+    # 2. 从 akshare 获取分红数据，对比 tushare 找出缺失的除权事件并修正
+    dividend_info = _get_missing_dividends(df, ts_code, end_date)
+    if not dividend_info.empty:
         modify_adj_factor(df, dividend_info)
 
     return _compute_qfq(df)
