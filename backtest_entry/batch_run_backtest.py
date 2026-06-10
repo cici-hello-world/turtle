@@ -29,6 +29,7 @@ import warnings
 import pandas as pd
 import numpy as np
 import tushare as ts
+from itertools import product
 
 warnings.filterwarnings("ignore")
 
@@ -42,8 +43,9 @@ from core.statistics import calc_stats
 # 配置
 # ============================================================
 # 策略参数（与 run_backtest.py 默认一致）
-CHANNEL_TYPE = "bollinger"  # "donchian" | "bollinger" — 切换通道类型
+CHANNEL_TYPE = "donchian"  # "donchian" | "bollinger" — 切换通道类型
 MODE = "long_more"
+SCAN_ALL = False #是否扫描全市场最优参数
 MAX_PYRAMID = 5
 ENTRY_PERIOD = 20
 EXIT_PERIOD = 10
@@ -52,8 +54,12 @@ N_VALUE = 2.0
 RISK_PERCENT = 1.0
 INITIAL_CAPITAL = 200000.0
 YEARS = 8
+FAST_PERIODS = [20, 25, 30, 40, 50]
+SLOW_PERIODS = [50, 60, 80, 100, 150, 200, 250, 300, 350]
 
-OUTPUT_CSV = os.path.join(os.path.dirname(__file__), f"{CHANNEL_TYPE}_stock_ranking.csv")
+BB_PERIODS = [10, 15, 20, 25, 30]
+BB_K_VALUES = [1.0, 1.5, 2.0, 2.5, 3.0]
+
 
 
 # ============================================================
@@ -89,7 +95,7 @@ def get_top10_stocks(pro, market: str) -> list[tuple[str, float, object]]:
     return ode.fetch_top10_by_liquidity(pro, candidates, ode.START_DATE, ode.END_DATE)
 
 
-def get_best_ema_params(market: str, top10_raw: list) -> tuple[int, int]:
+def get_best_ema_params(market: str, top10_raw: list, name_map) -> tuple[int, int]:
     """扫描 EMA 参数，返回最优 (ema_fast, ema_slow)
 
     注意：调用前须已通过 get_top10_stocks 加载对应 market 的模块。
@@ -97,7 +103,7 @@ def get_best_ema_params(market: str, top10_raw: list) -> tuple[int, int]:
     ode = sys.modules["optimize_donchian_ema"]
     label = "A股" if market == "A" else "港股"
     print(f"\n📊 扫描{label}最优 EMA 趋势过滤器参数 ...")
-    summary = ode.run_parameter_scan(top10_raw)
+    summary = ode.run_parameter_scan(top10_raw,  name_map)
     best = summary[summary["ema_fast"] > 0].iloc[0]
     ema_fast = int(best["ema_fast"])
     ema_slow = int(best["ema_slow"])
@@ -123,31 +129,73 @@ def get_best_bb_params(pro, market: str, top10_raw: list) -> tuple[int, float]:
     return bb_period, bb_k
 
 
-def run_single_backtest(config: BacktestConfig) -> dict | None:
+def run_single_scan_backtest(df_row,config: BacktestConfig) -> dict | None:
     """执行单只股票回测，返回 stats dict；失败返回 None"""
     try:
-        df = fetch_data(
-            ts_code=config.ts_code,
-            stock_name=config.stock_name,
-            market=config.market,
-            start_date=config.start_date,
-            end_date=config.end_date,
-            exchange=config.exchange,
-        )
-        df = compute_indicators(
-            df,
-            entry_period=config.entry_period,
-            exit_period=config.exit_period,
-            atr_period=config.atr_period,
-            ema_fast=config.ema_fast,
-            ema_slow=config.ema_slow,
-            channel_type=config.channel_type,
-            bb_period=config.bb_period,
-            bb_k=config.bb_k,
-        )
-        trades, equity = run_backtest(df, config)
-        stats = calc_stats(trades, config.initial_capital, equity)
-        return stats
+        # df = fetch_data(
+        #     ts_code=config.ts_code,
+        #     stock_name=config.stock_name,
+        #     market=config.market,
+        #     start_date=config.start_date,
+        #     end_date=config.end_date,
+        #     exchange=config.exchange,
+        # )
+        if CHANNEL_TYPE == "bollinger":
+            if config.bb_period==0 and config.bb_k==0:
+                x_y_list = product(BB_PERIODS, BB_K_VALUES)
+            else:
+                x_y_list = product([config.bb_period], [config.bb_k])
+        else:
+            if config.ema_fast==0 and config.ema_slow==0:
+                x_y_list = product(FAST_PERIODS, SLOW_PERIODS)
+            else:
+                x_y_list = product([config.ema_fast], [config.ema_slow])
+        results = []
+        for x, y in x_y_list:
+            if y == x:
+                continue
+            config.ema_fast = x
+            config.ema_slow = y
+            config.bb_period = x
+            config.bb_k = y
+            df = compute_indicators(
+                df_row,
+                entry_period=config.entry_period,
+                exit_period=config.exit_period,
+                atr_period=config.atr_period,
+                ema_fast=config.ema_fast,
+                ema_slow=config.ema_slow,
+                channel_type=config.channel_type,
+                bb_period=config.bb_period,
+                bb_k=config.bb_k,
+            )
+            trades, equity = run_backtest(df, config)
+            if len(trades)<15:
+                continue
+            stats = calc_stats(trades, config.initial_capital, equity)
+            stats['ema_fast']=config.ema_fast
+            stats['ema_slow']=config.ema_slow
+            stats['bb_period']=config.bb_period
+            stats['bb_k']=config.bb_k
+            results.append(stats)
+
+            print(f"    ✅ 回归年度回报率 (%): {stats['回归年度回报率 (%)']:+.2f}%  |  "
+                  f"胜率: {stats['胜率 (%)']}%  |  "
+                  f"回撤: {stats['最大回撤 (%)']}%  |  "
+                  f"交易: {stats['总交易']}笔  |  "
+                  f"R立方: {stats['R立方']:.2f}  |  "
+                  f"稳健夏普: {stats['稳健夏普比率']:.2f}")
+
+            # ———— 3. 综合评分排名 ————
+        if not results:
+            print("❌ 没有成功获取任何回测结果")
+            return
+
+        stats_rank = compute_ranking(results)
+        best = stats_rank[stats_rank['排名'] == 1]
+        if best.empty:
+            return None
+        return best.iloc[0].to_dict()
     except Exception as e:
         print(f"    ❌ 回测失败: {e}")
         return None
@@ -250,7 +298,7 @@ def main():
         return
     pro = ts.pro_api(token)
 
-    all_results = []
+
 
     for market in ("A", "HK"):
         label = "A股" if market == "A" else "港股"
@@ -258,7 +306,7 @@ def main():
 
         # ———— 1. 获取流动性 TOP10 ————
         print(f"\n{'=' * 80}")
-        print(f"📊 筛选{label}近五年日均成交额 TOP10 ...")
+        print(f"📊 筛选{label}近一年日均成交额 TOP10 ...")
         print(f"{'=' * 80}")
         top10_raw = get_top10_stocks(pro, market)
 
@@ -267,22 +315,23 @@ def main():
             name = name_map.get(ts_code, "")
             print(f"  #{i} {ts_code} {name}  日均成交额: {avg_amt:>15,.0f} {currency}")
 
-        # ———— 2. 扫描最优参数 ————
-        if CHANNEL_TYPE == "bollinger":
-            bb_period, bb_k = get_best_bb_params(pro, market, top10_raw)
-            ema_fast, ema_slow = 0,0
-            channel_label = f"布林线(period={bb_period}, k={bb_k})"
+        if SCAN_ALL:
+            # ———— 2. 扫描全市场最优参数 ————
+            if CHANNEL_TYPE == "bollinger":
+                bb_period, bb_k = get_best_bb_params(pro, market, top10_raw)
+                ema_fast, ema_slow = 0,0
+                channel_label = f"布林线(period={bb_period}, k={bb_k})"
+            else:
+                ema_fast, ema_slow = get_best_ema_params(market, top10_raw, name_map)
+                bb_period, bb_k = 0,0
+                channel_label = f"唐奇安 EMA({ema_fast},{ema_slow})"
         else:
-            ema_fast, ema_slow = get_best_ema_params(market, top10_raw)
-            bb_period, bb_k = 0,0
-            channel_label = f"唐奇安 EMA({ema_fast},{ema_slow})"
+            bb_period, bb_k = 0, 0
+            ema_fast, ema_slow = 0,0
 
         # ———— 3. 逐只回测 ————
-        print(f"\n{'=' * 80}")
-        print(f"🚀 开始{label}批量回测 (加仓做多, {channel_label})")
-        print(f"{'=' * 80}")
-
-        for i, (ts_code, avg_amt, _) in enumerate(top10_raw, 1):
+        all_results = []
+        for i, (ts_code, avg_amt, df_row) in enumerate(top10_raw, 1):
             name = name_map.get(ts_code, "")
             print(f"\n[{i}/10] {ts_code} {name} ...")
 
@@ -306,7 +355,7 @@ def main():
                 bb_k=bb_k,
             )
 
-            stats = run_single_backtest(config)
+            stats = run_single_scan_backtest(df_row,config)
             if stats is None:
                 continue
 
@@ -316,24 +365,26 @@ def main():
             stats["avg_amt"] = avg_amt
             all_results.append(stats)
 
-            print(f"    ✅ 总收益: {stats['总收益率 (%)']:+.2f}%  |  "
+            print(f"    ✅ 回归年度回报率 (%): {stats['回归年度回报率 (%)']}%  |  "
                   f"胜率: {stats['胜率 (%)']}%  |  "
                   f"回撤: {stats['最大回撤 (%)']}%  |  "
                   f"交易: {stats['总交易']}笔  |  "
-                  f"R立方: {stats['R立方']:.2f}  |  "
-                  f"稳健夏普: {stats['稳健夏普比率']:.2f}")
+                  f"R立方: {stats['R立方']}  |  "
+                  f"稳健夏普: {stats['稳健夏普比率']}")
 
-    # ———— 3. 综合评分排名 ————
-    if not all_results:
-        print("❌ 没有成功获取任何回测结果")
-        return
+        # ———— 3. 综合评分排名 ————
+        if not all_results:
+            print("❌ 没有成功获取任何回测结果")
+            return
+        all_results.sort(key=lambda x: x["综合得分"], reverse=True)
+        all_results = pd.DataFrame(all_results)
+        all_results["排名"] = range(1, len(all_results) + 1)
+        # print_results(all_results)
 
-    df = compute_ranking(all_results)
-    print_results(df)
-
-    # ———— 4. 保存 CSV ————
-    df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
-    print(f"\n✅ 排名结果已保存至 {OUTPUT_CSV}")
+        # ———— 4. 保存 CSV ————
+        OUTPUT_CSV = os.path.join(os.path.dirname(__file__), f"{CHANNEL_TYPE}_{market}_stock_ranking.csv")
+        all_results.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+        print(f"\n✅ 排名结果已保存至 {OUTPUT_CSV}")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 from itertools import groupby
 
+from keyring.backends import null
+
 
 def _build_equity_dates(trades: list[dict], equity_curve: list[float]) -> pd.Series | None:
     """为资金曲线每个点构造对应日期，失败返回 None"""
@@ -187,13 +189,17 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
         "R平方": 0,
         "稳健夏普比率": 0,
         "R立方": 0,
+        "last_entry_date":null,
+        "last_exit_date":null
+
     }
 
     if not trades:
         return empty_result
 
     df_trades = pd.DataFrame(trades)
-
+    last_entry_date = df_trades["Entry Date"].iloc[-1]
+    last_exit_date = df_trades["Exit Date"].iloc[-1]
     # 排除强制平仓
     df_trades = df_trades[df_trades["Reason"] != "强制平仓"]
 
@@ -281,4 +287,6 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
         "R平方": round(r_squared, 4),
         "稳健夏普比率": round(robust_sharpe, 2),
         "R立方": round(r_cubed, 2),
+        "last_entry_date": last_entry_date,
+        "last_exit_date": last_exit_date
     }

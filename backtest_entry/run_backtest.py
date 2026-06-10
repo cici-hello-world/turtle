@@ -108,6 +108,32 @@ if __name__ == "__main__":
     #     ema_slow=100,
     #     ema_fast=50,
     # )
+
+    # config = BacktestConfig(
+    #     ts_code="601318.SH",
+    #     stock_name="中国平安",
+    #     ema_fast=20,
+    #     ema_slow=250,
+    # )
+    config = BacktestConfig(
+        ts_code="300059.SZ",
+        stock_name="东方财富",
+        ema_fast=20,
+        ema_slow=50,
+    )
+    # config = BacktestConfig(
+    #     ts_code="300750.SZ",
+    #     stock_name="宁德时代",
+    #     ema_fast=20,
+    #     ema_slow=200,
+    # )
+
+    # config = BacktestConfig(
+    #     ts_code="002475.SZ",
+    #     stock_name="立讯精密",
+    #     ema_fast=20,
+    #     ema_slow=200,
+    # )
     # config = BacktestConfig(
     #     ts_code="601012.SH",
     #     stock_name="隆基绿能",
@@ -121,17 +147,15 @@ if __name__ == "__main__":
     #     ts_code="00388.HK",
     #     stock_name="香港交易所",
     #     market="HK",
-    #     mode="long_more",
-    #     max_pyramid=5,
-    #     ema_fast=50
+    #     ema_fast=30,
+    #     ema_slow=60,
     # )
     # config = BacktestConfig(
     #     ts_code="03690.HK",
     #     stock_name="美团",  # 2018-09-20开市
     #     market="HK",
-    #     mode="long_more",
-    #     max_pyramid=5,
-    #     ema_fast=50
+    #     ema_fast=20,
+    #     ema_slow=60,
     # )
     # config = BacktestConfig(
     #     ts_code="03690.HK",
@@ -141,18 +165,18 @@ if __name__ == "__main__":
     #     max_pyramid=5,
     #     channel_type="bollinger"
     # )
-    config = BacktestConfig(
-        ts_code="09992.HK",
-        stock_name="泡泡玛特",
-        market="HK",
-        mode="long",
-        years=5,
-        per_shares=200,
-        max_pyramid=5,
-        channel_type="bollinger",
-        bb_period=10,
-        bb_k=1,
-    )
+    # config = BacktestConfig(
+    #     ts_code="09992.HK",
+    #     stock_name="泡泡玛特",
+    #     market="HK",
+    #     mode="long",
+    #     years=5,
+    #     per_shares=200,
+    #     max_pyramid=5,
+    #     channel_type="bollinger",
+    #     bb_period=10,
+    #     bb_k=1,
+    # )
     # config = BacktestConfig(
     #     ts_code="00700.HK",
     #     stock_name="腾讯",
@@ -184,13 +208,30 @@ if __name__ == "__main__":
     #     bb_period=10,
     #     bb_k=1,
     # )
+    # config = BacktestConfig(
+    #     ts_code="300502.SZ",
+    #     stock_name="新易盛",
+    #     market="A",
+    #     mode="long_more",
+    #     max_pyramid=5,
+    #     ema_fast=50,
+    #     channel_type="donchian",
+    #     bb_period=10,
+    #     bb_k=1,
+    # )
 
     # config = BacktestConfig(
     #     ts_code="01810.HK",
     #     stock_name="小米",  # 2018-07-09开市
     #     market="HK",
-    #     mode="long_more",
-    #     max_pyramid=5,
-    #     ema_fast=50
+    #     ema_fast=20,
+    #     ema_slow=200,
     # )
+    config = BacktestConfig(
+        ts_code="00939.HK",
+        stock_name="建设银行",  # 2018-07-09开市
+        market="HK",
+        ema_fast=25,
+        ema_slow=60,
+    )
     run(config)
