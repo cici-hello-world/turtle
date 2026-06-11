@@ -35,7 +35,6 @@ RATE_LIMIT = 0.35
 
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(OUTPUT_DIR)
-OUTPUT_PATH = os.path.join(PROJECT_DIR, "market_liquidity.xlsx")
 
 
 # ============================================================
@@ -43,7 +42,7 @@ OUTPUT_PATH = os.path.join(PROJECT_DIR, "market_liquidity.xlsx")
 # ============================================================
 def get_latest_trade_date(pro, exchange: str) -> str:
     """获取最近一个交易日"""
-    today = datetime.today().strftime("%Y%m%d")
+    today = (datetime.today() - timedelta(days=2)).strftime("%Y%m%d")
     cal = pro.trade_cal(exchange=exchange,
                         start_date=(datetime.today() - timedelta(days=10)).strftime("%Y%m%d"),
                         end_date=today)
@@ -198,6 +197,7 @@ def main():
     rank_hk = build_ranking(df_hk, pro, "HK") if df_hk is not None else pd.DataFrame()
 
     # ———— 保存 ————
+    OUTPUT_PATH = os.path.join(PROJECT_DIR, f"market_liquidity_{a_date}.xlsx")
     save_to_excel(rank_a, rank_hk, a_date, OUTPUT_PATH)
 
 

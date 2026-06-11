@@ -16,6 +16,8 @@ def run_backtest(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
         return _run_long_only(df, config)
     elif config.mode == "long_more":
         return _run_long_with_pyramid(df, config)
+    elif config.mode == "short_more":
+        return _run_short_with_pyramid(df, config)
     elif config.mode == "both":
         return _run_long_short(df, config)
     else:
@@ -168,8 +170,8 @@ def _print_entry(label, price, shares, cost, capital, stop_loss):
           f"剩余资金：{capital:.2f} | 止损：{stop_loss:.2f}")
 
 
-def _print_short_entry(label, price, shares, income, capital, stop_loss):
-    print(f"  🟢 [{label}] 做空入场：{price:.2f} | "
+def _print_short_entry(label,ts_code, price, shares, income, capital, stop_loss):
+    print(f"  🟢 [{label}] [{ts_code}] 做空入场：{price:.2f} | "
           f"股数：{shares} | 收入：{income:.2f} | "
           f"剩余资金：{capital:.2f} | 止损：{stop_loss:.2f}")
 
@@ -195,7 +197,7 @@ def _print_force_close(label, pnl, capital):
 def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
     label = config.channel_type
     ps = config.per_shares
-    _print_header(label, config.initial_capital, config.risk_percent)
+    # _print_header(label, config.initial_capital, config.risk_percent)
 
     trades = []
     capital = config.initial_capital
@@ -229,7 +231,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 current_shares = shares
                 entry_date = current_date
                 capital -= cost
-                _print_entry(label, row["Close"], shares * ps, cost, capital, stop_loss_price)
+                # _print_entry(label, row["Close"], shares * ps, cost, capital, stop_loss_price)
 
         else:
             exit_price, exit_reason = _check_long_exit(row, stop_loss_price, config)
@@ -245,7 +247,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                     stop_dist=stop_dist,
                 ))
                 equity_curve.append(capital)
-                _print_exit(label, pnl, capital, exit_reason)
+                # _print_exit(label, pnl, capital, exit_reason)
                 pos = None
                 current_shares = 0
                 entry_price = 0.0
@@ -266,7 +268,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
             cost_basis, pnl, capital, "强制平仓",
             stop_dist=stop_dist,
         ))
-        _print_force_close(label, pnl, capital)
+        # _print_force_close(label, pnl, capital)
 
     return trades, equity_curve
 
@@ -276,7 +278,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
 def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
     label = config.channel_type
     ps = config.per_shares
-    _print_header(label, config.initial_capital, config.risk_percent)
+    # _print_header(label, config.initial_capital, config.risk_percent)
 
     trades = []
     capital = config.initial_capital
@@ -320,7 +322,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
                 total_cost = cost
                 entry_date = current_date
                 capital -= cost
-                _print_entry(label, row["Close"], shares * ps, cost, capital, stop_loss_price)
+                # _print_entry(label, row["Close"], shares * ps, cost, capital, stop_loss_price)
 
         else:
             exit_price, exit_reason = _check_long_exit(row, stop_loss_price, config)
@@ -345,8 +347,8 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
                         if skip_offset and len(more_info) == 1:
                             print(f"  ⚠️ [{label}] 已跳过首次加仓（entry + 0.5×ATR），"
                                   f"本次为第2次加仓位")
-                        _print_pyramid_add(label, add_price, base_shares * ps,
-                                          add_cost, capital, stop_loss_price)
+                        # _print_pyramid_add(label, add_price, base_shares * ps,
+                        #                   add_cost, capital, stop_loss_price)
 
             if exit_reason:
                 sell_proceeds = exit_price * current_shares * ps
@@ -360,7 +362,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
                     stop_dist=stop_dist, more_info=more_info,
                 ))
                 equity_curve.append(capital)
-                _print_exit(label, pnl, capital, exit_reason)
+                # _print_exit(label, pnl, capital, exit_reason)
                 pos = None
                 current_shares = 0
                 base_shares = 0
@@ -386,7 +388,121 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
             total_cost, pnl, capital, "强制平仓",
             stop_dist=stop_dist, more_info=more_info,
         ))
-        _print_force_close(label, pnl, capital)
+        # _print_force_close(label, pnl, capital)
+
+    return trades, equity_curve
+
+# ==================== 加仓做空（金字塔） ====================
+
+def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
+    label = config.channel_type
+    ps = config.per_shares
+    # _print_header(label, config.initial_capital, config.risk_percent)
+
+    trades = []
+    capital = config.initial_capital
+    equity_curve = [config.initial_capital]
+
+    pos = None
+    entry_price = 0.0
+    entry_atr = 0.0
+    stop_loss_price = 0.0
+    stop_dist = 0.0
+    current_shares = 0
+    base_shares = 0
+    max_shares = 0
+    total_income = 0.0
+    entry_date = None
+    more_info = []
+
+    start_index = config.entry_period + 1
+
+    for i in range(start_index, len(df)):
+        row = df.iloc[i]
+        current_date = row["Date"]
+
+        if pos is None:
+            stop_dist, shares = _prep_entry(row, capital, config, ps)
+            if shares <= 0:
+                continue
+            base_shares = shares
+            skip_offset = 1 if config.skip_first_add else 0
+            max_shares = shares * (config.max_pyramid - skip_offset)
+
+            if _short_entry_triggered(row, config) and _ema_trend_ok(row, config,"short"):
+                entry_price = row["Close"]
+                entry_atr = row["ATR"]
+                income = entry_price * shares * ps
+                pos = "short"
+                stop_loss_price = entry_price + stop_dist
+                current_shares = shares
+                entry_date = current_date
+                capital += income
+                total_income += income
+                # _print_short_entry(label, row["ts_code"],entry_price, shares * ps, income, capital, stop_loss_price)
+        else:
+            exit_price, exit_reason = _check_short_exit(row, stop_loss_price, config)
+
+            # 加仓（仅在未触发出场信号时检查，以入场 ATR 为基准）
+            if not exit_reason and entry_atr > 0:
+                units_held = current_shares // base_shares + skip_offset
+                if row["Close"] < (entry_price - units_held * 0.5 * entry_atr) and _ema_trend_ok(row, config,"short"):
+                    if current_shares < max_shares:
+                        add_price = row["Close"]
+                        stop_loss_price = add_price + config.n_value * entry_atr
+                        add_income = add_price * base_shares * ps
+                        current_shares += base_shares
+                        capital += add_income
+                        total_income += add_income
+                        more_info.append({
+                            "More Price": add_price,
+                            "More Date": current_date.strftime("%Y%m%d"),
+                        })
+                        if skip_offset and len(more_info) == 1:
+                            print(f"  ⚠️ [{label}] 已跳过首次加仓（entry + 0.5×ATR），"
+                                  f"本次为第2次加仓位")
+                        # _print_pyramid_add(label, add_price, base_shares * ps,
+                        #                   add_income, capital, stop_loss_price)
+
+            if exit_reason:
+                sale_proceeds = exit_price * current_shares * ps
+                pnl = total_income - sale_proceeds
+                capital -= sale_proceeds
+
+                trades.append(_build_trade(
+                    entry_date, current_date, "short",
+                    entry_price, exit_price, current_shares,
+                    total_income, pnl, capital, exit_reason,
+                    stop_dist=stop_dist, more_info=more_info,
+                ))
+                equity_curve.append(capital)
+                # _print_exit(label, pnl, capital, exit_reason)
+                pos = None
+                current_shares = 0
+                base_shares = 0
+                max_shares = 0
+                entry_price = 0.0
+                entry_atr = 0.0
+                stop_loss_price = 0.0
+                total_income = 0.0
+                entry_date = None
+                more_info = []
+
+    # 强制平仓
+    if pos == "short":
+        last_price = df.iloc[-1]["Close"]
+        last_date = df.iloc[-1]["Date"]
+        sale_proceeds = last_price * current_shares * ps
+        pnl = total_income - sale_proceeds
+        capital -= sale_proceeds
+
+        trades.append(_build_trade(
+            entry_date, last_date, "short",
+            entry_price, last_price, current_shares,
+            total_income, pnl, capital, "强制平仓",
+            stop_dist=stop_dist, more_info=more_info,
+        ))
+        # _print_force_close(label, pnl, capital)
 
     return trades, equity_curve
 
@@ -396,7 +512,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
 def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
     label = "System 1"
     PS = 100  # 多空脚本硬编码，不使用 config.per_shares
-    _print_header(label, config.initial_capital, config.risk_percent)
+    # _print_header(label, config.initial_capital, config.risk_percent)
 
     trades = []
     capital = config.initial_capital
@@ -430,7 +546,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 current_shares = shares
                 entry_date = current_date
                 capital -= cost
-                _print_entry(label, entry_price, shares * PS, cost, capital, stop_loss_price)
+                # _print_entry(label, entry_price, shares * PS, cost, capital, stop_loss_price)
 
             elif _short_entry_triggered(row, config) and _ema_trend_ok(row, config, "short"):
                 income = entry_price * shares * PS
@@ -439,7 +555,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 current_shares = -shares
                 entry_date = current_date
                 capital += income
-                _print_short_entry(label, entry_price, shares * PS, income, capital, stop_loss_price)
+                # _print_short_entry(label, entry_price, shares * PS, income, capital, stop_loss_price)
 
         else:
             exit_price, exit_reason = _check_both_exit(row, pos, stop_loss_price, config)
@@ -458,7 +574,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                     cost_basis, pnl, capital, exit_reason,
                 ))
                 equity_curve.append(capital)
-                _print_exit(label, pnl, capital, exit_reason)
+                # _print_exit(label, pnl, capital, exit_reason)
                 pos = None
                 current_shares = 0
                 entry_price = 0.0
@@ -483,6 +599,6 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
             entry_price, last_price, current_shares,
             cost_basis, pnl, capital, "强制平仓",
         ))
-        _print_force_close(label, pnl, capital)
+        # _print_force_close(label, pnl, capital)
 
     return trades, equity_curve

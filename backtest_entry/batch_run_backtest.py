@@ -132,14 +132,6 @@ def get_best_bb_params(pro, market: str, top10_raw: list) -> tuple[int, float]:
 def run_single_scan_backtest(df_row,config: BacktestConfig) -> dict | None:
     """执行单只股票回测，返回 stats dict；失败返回 None"""
     try:
-        # df = fetch_data(
-        #     ts_code=config.ts_code,
-        #     stock_name=config.stock_name,
-        #     market=config.market,
-        #     start_date=config.start_date,
-        #     end_date=config.end_date,
-        #     exchange=config.exchange,
-        # )
         if CHANNEL_TYPE == "bollinger":
             if config.bb_period==0 and config.bb_k==0:
                 x_y_list = product(BB_PERIODS, BB_K_VALUES)
@@ -169,6 +161,7 @@ def run_single_scan_backtest(df_row,config: BacktestConfig) -> dict | None:
                 bb_period=config.bb_period,
                 bb_k=config.bb_k,
             )
+            print(f"=========={x}_{y}_{config.ts_code} 开始生成traders===========")
             trades, equity = run_backtest(df, config)
             if len(trades)<15:
                 continue
@@ -179,19 +172,12 @@ def run_single_scan_backtest(df_row,config: BacktestConfig) -> dict | None:
             stats['bb_k']=config.bb_k
             results.append(stats)
 
-            print(f"    ✅ 回归年度回报率 (%): {stats['回归年度回报率 (%)']:+.2f}%  |  "
-                  f"胜率: {stats['胜率 (%)']}%  |  "
-                  f"回撤: {stats['最大回撤 (%)']}%  |  "
-                  f"交易: {stats['总交易']}笔  |  "
-                  f"R立方: {stats['R立方']:.2f}  |  "
-                  f"稳健夏普: {stats['稳健夏普比率']:.2f}")
-
             # ———— 3. 综合评分排名 ————
         if not results:
             print("❌ 没有成功获取任何回测结果")
-            return
+            return None
 
-        stats_rank = compute_ranking(results)
+        stats_rank = compute_ranking(results,config.ts_code)
         best = stats_rank[stats_rank['排名'] == 1]
         if best.empty:
             return None
@@ -212,7 +198,7 @@ def _norm(series: pd.Series) -> pd.Series:
     return (series - mn) / (mx - mn)
 
 
-def compute_ranking(results: list[dict]) -> pd.DataFrame:
+def compute_ranking(results: list[dict],ts_code) -> pd.DataFrame:
     """对回测结果计算综合评分并排名"""
     df = pd.DataFrame(results)
 
@@ -232,6 +218,12 @@ def compute_ranking(results: list[dict]) -> pd.DataFrame:
 
     df = df.sort_values("综合得分", ascending=False).reset_index(drop=True)
     df["排名"] = range(1, len(df) + 1)
+
+    # ————  保存 CSV ————
+    OUTPUT_CSV = os.path.join(os.path.dirname(__file__), f"{ts_code}_xy_param_ranking.csv")
+    df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+    print(f"\n✅ 排名结果已保存至 {OUTPUT_CSV}")
+
     return df
 
 
@@ -320,11 +312,9 @@ def main():
             if CHANNEL_TYPE == "bollinger":
                 bb_period, bb_k = get_best_bb_params(pro, market, top10_raw)
                 ema_fast, ema_slow = 0,0
-                channel_label = f"布林线(period={bb_period}, k={bb_k})"
             else:
                 ema_fast, ema_slow = get_best_ema_params(market, top10_raw, name_map)
                 bb_period, bb_k = 0,0
-                channel_label = f"唐奇安 EMA({ema_fast},{ema_slow})"
         else:
             bb_period, bb_k = 0, 0
             ema_fast, ema_slow = 0,0
@@ -382,7 +372,7 @@ def main():
         # print_results(all_results)
 
         # ———— 4. 保存 CSV ————
-        OUTPUT_CSV = os.path.join(os.path.dirname(__file__), f"{CHANNEL_TYPE}_{market}_stock_ranking.csv")
+        OUTPUT_CSV = os.path.join(os.path.dirname(__file__), f"{CHANNEL_TYPE}_{market}_{MODE}_stock_ranking.csv")
         all_results.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
         print(f"\n✅ 排名结果已保存至 {OUTPUT_CSV}")
 

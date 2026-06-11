@@ -49,7 +49,8 @@ def _fetch_a_share(pro, ts_code: str, start_date: str, end_date: str) -> pd.Data
         df_adj = pd.DataFrame({"trade_date": df_daily["trade_date"], "adj_factor": 1.0})
 
     # 3. 合并与计算前复权
-    df = pd.merge(df_daily, df_adj, on="trade_date", how="inner")
+    df_adj_clean = df_adj[["trade_date", "adj_factor"]]
+    df = pd.merge(df_daily, df_adj_clean, on="trade_date", how="inner")
     df = df.sort_values("trade_date")
 
     return _compute_qfq(df)
@@ -144,8 +145,8 @@ def _compute_qfq(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.rename(columns={"trade_date": "Date"})
     df["Date"] = pd.to_datetime(df["Date"])
-    df = df[["Date", "Open_QFQ", "High_QFQ", "Low_QFQ", "Close_QFQ", "vol", "amount", "adj_factor"]]
-    df.columns = ["Date", "Open", "High", "Low", "Close", "Volume", "Amount", "Adj_Factor"]
+    df = df[["ts_code","Date", "Open_QFQ", "High_QFQ", "Low_QFQ", "Close_QFQ", "vol", "amount", "adj_factor"]]
+    df.columns = ["ts_code","Date", "Open", "High", "Low", "Close", "Volume", "Amount", "Adj_Factor"]
     return df
 
 
