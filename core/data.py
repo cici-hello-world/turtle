@@ -24,6 +24,8 @@ def fetch_data(ts_code: str, stock_name: str, market: str,
 
     if market == "A":
         df = _fetch_a_share(pro, ts_code, start_date, end_date)
+    elif market == "ETF":
+        df = _fetch_etf(pro, ts_code, start_date, end_date)
     else:
         df = _fetch_hk_share(pro, ts_code, start_date, end_date)
 
@@ -134,6 +136,26 @@ def _fetch_hk_share(pro, ts_code: str, start_date: str,
 
     return _compute_qfq(df)
 
+
+def _fetch_etf(pro, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+
+    df = pro.fund_daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+    if df.empty:
+        raise ValueError("❌ 错误：未获取到ETF日线数据")
+
+    # 2. 下载复权因子
+    try:
+        df_adj = pro.fund_adj(ts_code=ts_code, start_date=start_date, end_date=end_date)
+    except Exception as e:
+        print(f"⚠️ 警告：复权因子获取失败，尝试使用默认因子 1.0 ({e})")
+        df_adj = pd.DataFrame({"trade_date": df["trade_date"], "adj_factor": 1.0})
+
+    # 3. 合并与计算前复权
+    df_adj_clean = df_adj[["trade_date", "adj_factor"]]
+    df = pd.merge(df, df_adj_clean, on="trade_date", how="inner")
+    df = df.sort_values("trade_date")
+
+    return _compute_qfq(df)
 
 def _compute_qfq(df: pd.DataFrame) -> pd.DataFrame:
     """前复权计算 + 列重命名为标准格式"""

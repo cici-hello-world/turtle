@@ -57,7 +57,7 @@ class BacktestConfig:
 
         # 自动推导交易所代码
         if not self.exchange:
-            if self.market == "A":
+            if self.market == "A" or self.market == "ETF":
                 # A股上交所/深交所共用 XSHG 交易日历
                 self.exchange = "XSHG"
             elif self.market == "HK":
@@ -67,15 +67,24 @@ class BacktestConfig:
         if not self.output_dir:
             if self.market == "A":
                 suffix_map = {
-                    "long": "a_stock_backtest",
-                    "long_more": "a_stock_backtest_more",
-                    "both": "a_stock_backtest_short",
+                    "long": "a_stock_long_result",
+                    "long_more": "a_stock_long_more_result",
+                    "short_more": "a_stock_shot_more_result",
+                    "both": "a_stock_both_result",
+                }
+            elif self.market == "ETF":
+                suffix_map = {
+                    "long": "ETF_long_result",
+                    "long_more": "ETF_long_more_result",
+                    "short_more": "ETF_shot_more_result",
+                    "both": "ETF_both_result",
                 }
             else:
                 suffix_map = {
-                    "long": "hk_stock_backtest",
-                    "long_more": "hk_stock_backtest_more",
-                    "both": "hk_stock_backtest_short",
+                    "long": "hk_stock_long_result",
+                    "long_more": "hk_stock_long_more_result",
+                    "short_more": "hk_stock_shot_more_result",
+                    "both": "hk_stock_both_result",
                 }
             self.output_dir = suffix_map.get(self.mode, f"{self.market.lower()}_stock_backtest")
 

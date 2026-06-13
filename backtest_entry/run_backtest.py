@@ -65,16 +65,16 @@ def run(config: BacktestConfig):
 
 # ==================== 配置示例（直接运行此脚本时使用） ====================
 if __name__ == "__main__":
-    config = BacktestConfig(
-        # ========== 股票信息 ==========
-        ts_code="601138.SH",
-        stock_name="工业富联",
-        market="A",          # "A" or "HK"
-        # ========== 回测周期 ==========
-        years=8,
-        # ========== 策略模式 ==========
-        mode="long_more",         # "long" | "long_more" | "both"
-    )
+    # config = BacktestConfig(
+    #     # ========== 股票信息 ==========
+    #     ts_code="601138.SH",
+    #     stock_name="工业富联",
+    #     market="A",          # "A" or "HK"
+    #     # ========== 回测周期 ==========
+    #     years=8,
+    #     # ========== 策略模式 ==========
+    #     mode="long_more",         # "long" | "long_more" | "both"
+    # )
     # ================ 泡泡玛特 ================
     # config = BacktestConfig(
     #     ts_code="09992.HK",
@@ -84,9 +84,9 @@ if __name__ == "__main__":
     #     years=8,
     #     per_shares=200,
     #     max_pyramid=5,
-    #     ema_fast=20,
-    #     ema_slow=300,
-    #     skip_first_add = False
+    #     ema_fast=0,
+    #     ema_slow=0,
+    #     skip_first_add = True
     # )
     # config = BacktestConfig(
     #     ts_code="300274.SZ",
@@ -98,12 +98,12 @@ if __name__ == "__main__":
     #     ema_fast=50,
     # )
 
-    # config = BacktestConfig(
-    #     ts_code="601318.SH",
-    #     stock_name="中国平安",
-    #     ema_fast=20,
-    #     ema_slow=250,
-    # )
+    config = BacktestConfig(
+        ts_code="601318.SH",
+        stock_name="中国平安",
+        ema_fast=20,
+        ema_slow=250,
+    )
     # config = BacktestConfig(
     #     ts_code="300059.SZ",
     #     stock_name="东方财富",
@@ -237,8 +237,8 @@ if __name__ == "__main__":
     #     ts_code="00939.HK",
     #     stock_name="建设银行",  # 2018-07-09开市
     #     market="HK",
-    #     ema_fast=25,
-    #     ema_slow=60,
+    #     ema_fast=0,
+    #     ema_slow=0,
     # )
 
     # config = BacktestConfig(
@@ -248,4 +248,11 @@ if __name__ == "__main__":
     #     ema_fast=25,
     #     ema_slow=60,
     # )
+    config = BacktestConfig(
+        ts_code="513500.SH",
+        stock_name="标普500",  # 2018-07-09开市
+        market="ETF",
+        ema_fast=0,
+        ema_slow=0,
+    )
     run(config)

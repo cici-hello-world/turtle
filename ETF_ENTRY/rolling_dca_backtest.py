@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+"""滚动5年 DCA 定投回测 —— 步长1个月，统计各窗口 XIRR 分布
+第一步：查询投资周期
+用法：
+  python backtest_entry/rolling_dca_backtest.py
+"""
+
+import os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+import tushare as ts
+from pandas import DataFrame
+
+from core.config import BacktestConfig
+from core.data import fetch_data
+from backtest_entry.dca_utils import find_investment_dates, simulate_dca, _compute_xirr
+
+# ============================================================
+# 配置
+# ============================================================
+TS_CODE = "513500.SH"
+STOCK_NAME = "标普500ETF"
+MONTHLY_AMOUNT = 3000.0
+PER_SHARES = 100
+TARGET_DAY = 9
+WINDOW_YEARS = 10
+STEP_MONTHS = 1       # 步长（月）
+
+out_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ETF_dca_rolling")
+os.makedirs(out_dir, exist_ok=True)
+
+
+# ============================================================
+# 1. 获取 ETF 上市日期
+# ============================================================
+def get_etf_list_date(ts_code: str,sn:str) -> str:
+    """查询 ETF 上市日期，返回 'YYYYMMDD'"""
+    token = os.environ.get("TUSHARE_TOKEN")
+    if not token:
+        raise RuntimeError("❌ 未设置 TUSHARE_TOKEN")
+    ts.set_token(token)
+    pro = ts.pro_api()
+
+    df = pro.fund_basic(ts_code=ts_code, market="E")
+    if df.empty:
+        raise ValueError(f"❌ 未找到 ETF {ts_code} 的基本信息")
+    list_date = str(df.iloc[0]["list_date"])
+    print(f"📌 {sn} ({ts_code}) 上市日期: {list_date}")
+    return list_date
+
+
+# ============================================================
+# 2. 生成滚动窗口
+# ============================================================
+def generate_rolling_windows(start_date: str, end_date: str,
+                             window_years: int, step_months: int) -> list:
+    """生成滚动窗口 (start, end) 列表"""
+    start_dt = pd.Timestamp(start_date)
+    end_dt = pd.Timestamp(end_date)
+    windows = []
+
+    current = start_dt
+    while True:
+        window_end = current + pd.DateOffset(years=window_years)
+        if window_end > end_dt:
+            break
+        windows.append((current.strftime("%Y%m%d"), window_end.strftime("%Y%m%d")))
+        current += pd.DateOffset(months=step_months)
+
+    print(f"✅ 生成 {len(windows)} 个滚动窗口"
+          f"（{windows[0][0]} → {windows[-1][1]}）")
+    return windows
+
+
+# ============================================================
+# 3. 滚动回测
+# ============================================================
+def run_rolling_backtest(df_full: pd.DataFrame, windows: list) -> list:
+    """对每个窗口执行 DCA 模拟并计算 XIRR"""
+    results = []
+    total = len(windows)
+
+    for i, (start, end) in enumerate(windows):
+        # 截取窗口数据
+        mask = (df_full["Date"] >= start) & (df_full["Date"] <= end)
+        df_window = df_full[mask].copy()
+
+        if df_window.empty:
+            results.append({
+                "开始日期": pd.Timestamp(start),
+                "结束日期": pd.Timestamp(end),
+                "投资期数": 0,
+                "总投入": 0,
+                "最终市值": 0,
+                "总收益率": np.nan,
+                "XIRR": np.nan,
+            })
+            continue
+
+        # 定位投资日
+        invest_dates = find_investment_dates(df_window, TARGET_DAY)
+        if len(invest_dates) < 12:  # 至少需要1年数据
+            results.append({
+                "开始日期": pd.Timestamp(start),
+                "结束日期": pd.Timestamp(end),
+                "投资期数": len(invest_dates),
+                "总投入": 0,
+                "最终市值": 0,
+                "总收益率": np.nan,
+                "XIRR": np.nan,
+            })
+            continue
+
+        # DCA 模拟
+        sim = simulate_dca(df_window, invest_dates, MONTHLY_AMOUNT, PER_SHARES)
+
+        # XIRR
+        inv_df = sim["investments"]
+        cashflows = []
+        cf_dates = []
+        for _, inv in inv_df.iterrows():
+            if inv["买入手数"] > 0:
+                cashflows.append(-inv["买入金额"])
+                cf_dates.append(inv["投资日期"])
+        cashflows.append(sim["final_value"])
+        cf_dates.append(pd.Timestamp(end))
+        xirr = _compute_xirr(cashflows, cf_dates) if len(cashflows) > 1 else None
+
+        results.append({
+            "开始日期": pd.Timestamp(start),
+            "结束日期": pd.Timestamp(end),
+            "投资期数": len(invest_dates),
+            "总投入": sim["total_invested"],
+            "最终市值": sim["final_value"],
+            "总收益率": (sim["final_value"] - sim["total_invested"]) / sim["total_invested"] * 100,
+            "XIRR": xirr * 100 if xirr is not None else np.nan,
+        })
+
+        if (i + 1) % 50 == 0 or i == 0:
+            xirr_str = f"{results[-1]['XIRR']:.2f}%" if not np.isnan(results[-1]["XIRR"]) else "N/A"
+            print(f"  进度: {i+1}/{total}  —  {start[:6]} → {end[:6]}  XIRR: {xirr_str}")
+
+    return results
+
+
+# ============================================================
+# 4. 统计
+# ============================================================
+def compute_stats(results: list) -> dict:
+    """计算滚动 XIRR 分布的统计指标"""
+    df = pd.DataFrame(results).dropna(subset=["XIRR"])
+    n = len(df)
+
+    if n == 0:
+        return {"样本总数": 0}
+
+    # 按 XIRR 排序，中位数值和对应日期严格来自同一条记录
+    df_sorted = df.sort_values("XIRR").reset_index(drop=True)
+    median_row = df_sorted.iloc[n // 2]
+
+    xirrs = df["XIRR"].values
+    loss_ratio = (xirrs < 0).sum() / n * 100
+
+    stats = {
+        "样本总数": n,
+        "XIRR中位数": median_row["XIRR"],
+        "中位数对应开始日期": median_row["开始日期"],
+        "中位数对应结束日期": median_row["结束日期"],
+        "XIRR算术均值": np.mean(xirrs),
+        "亏损窗口占比 (%)": loss_ratio,
+        "10%分位数": np.percentile(xirrs, 10),
+        "90%分位数": np.percentile(xirrs, 90),
+        "XIRR标准差": np.std(xirrs, ddof=1),
+        "最小XIRR": np.min(xirrs),
+        "最大XIRR": np.max(xirrs),
+    }
+    return stats
+
+
+# ============================================================
+# 5. 输出
+# ============================================================
+def print_stats(stats: dict,wy:int,tc:str,sn:str):
+    """打印统计摘要"""
+    print(f"\n{'=' * 65}")
+    print("📊 滚动窗口 XIRR 分布统计")
+    print(f"{'=' * 65}")
+    print(f"  ETF: {sn} ({tc})")
+    print(f"  窗口: {wy} 年，步长 {STEP_MONTHS} 个月")
+    print(f"  定投日: 每月 {TARGET_DAY} 日")
+    print()
+
+    rows = [
+        ("📋 样本总数", stats.get("样本总数", 0)),
+        ("📐 XIRR 中位数", stats.get("XIRR中位数", 0)),
+        ("📅 中位数对应开始日期", stats.get("中位数对应开始日期", "-")),
+        ("📅 中位数对应结束日期", stats.get("中位数对应结束日期", "-")),
+        ("📐 XIRR 算术均值", stats.get("XIRR算术均值", 0)),
+        ("📉 亏损窗口占比", stats.get("亏损窗口占比 (%)", 0)),
+        ("📊 10% 分位数", stats.get("10%分位数", 0)),
+        ("📊 90% 分位数", stats.get("90%分位数", 0)),
+        ("📏 XIRR 标准差", stats.get("XIRR标准差", 0)),
+        ("📉 最小 XIRR", stats.get("最小XIRR", 0)),
+        ("📈 最大 XIRR", stats.get("最大XIRR", 0)),
+    ]
+    for label, value in rows:
+        if isinstance(value, pd.Timestamp):
+            print(f"  {label:<18}  {value.strftime('%Y-%m-%d')}")
+        elif isinstance(value, float):
+            print(f"  {label:<18}  {value:.2f}")
+        else:
+            print(f"  {label:<18}  {value}")
+
+
+def plot_rolling(results: list, stats: dict, wy:int, tc:str, sn:str):
+    """绘制 XIRR 滚动分布图"""
+    df = pd.DataFrame(results).dropna(subset=["XIRR"])
+    if df.empty:
+        return
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(18, 10))
+
+    # 上图：XIRR 时间序列
+    ax1.plot(df["开始日期"], df["XIRR"], color="#3498db", linewidth=1.0)
+    ax1.axhline(y=0, color="#e74c3c", linestyle="--", linewidth=0.8, alpha=0.6)
+    ax1.axhline(y=stats["XIRR中位数"], color="#e67e22", linestyle="--", linewidth=1.0,
+                label=f"中位数: {stats['XIRR中位数']:.2f}%")
+    ax1.axhline(y=stats["XIRR算术均值"], color="#2ecc71", linestyle="--", linewidth=1.0,
+                label=f"均值: {stats['XIRR算术均值']:.2f}%")
+    ax1.axhline(y=stats["10%分位数"], color="#9b59b6", linestyle=":", linewidth=0.8, alpha=0.7)
+    ax1.axhline(y=stats["90%分位数"], color="#9b59b6", linestyle=":", linewidth=0.8, alpha=0.7)
+    ax1.fill_between(df["开始日期"], 0, df["XIRR"],
+                     where=(df["XIRR"] >= 0), color="#3498db", alpha=0.15)
+    ax1.fill_between(df["开始日期"], 0, df["XIRR"],
+                     where=(df["XIRR"] < 0), color="#e74c3c", alpha=0.15)
+    ax1.set_title(f"{sn} ({tc}) 滚动{wy}年定投 XIRR",
+                  fontsize=14, fontweight="bold")
+    ax1.set_ylabel("XIRR (%)", fontsize=11)
+    ax1.legend(loc="upper left", fontsize=9)
+    ax1.grid(True, alpha=0.3, linestyle="--")
+
+    # 下图：XIRR 分布直方图
+    ax2.hist(df["XIRR"], bins=40, color="#3498db", edgecolor="white", alpha=0.8)
+    ax2.axvline(x=0, color="#e74c3c", linestyle="--", linewidth=1.0, label="盈亏分界")
+    ax2.axvline(x=stats["XIRR中位数"], color="#e67e22", linestyle="--", linewidth=1.5,
+                label=f"中位数: {stats['XIRR中位数']:.2f}%")
+    ax2.axvline(x=stats["XIRR算术均值"], color="#2ecc71", linestyle="--", linewidth=1.5,
+                label=f"均值: {stats['XIRR算术均值']:.2f}%")
+    ax2.axvline(x=stats["10%分位数"], color="#9b59b6", linestyle=":", linewidth=1.0,
+                label=f"P10: {stats['10%分位数']:.2f}%")
+    ax2.axvline(x=stats["90%分位数"], color="#9b59b6", linestyle=":", linewidth=1.0,
+                label=f"P90: {stats['90%分位数']:.2f}%")
+    ax2.set_xlabel("XIRR (%)", fontsize=11)
+    ax2.set_ylabel("频数", fontsize=11)
+    ax2.set_title(f"XIRR 分布（n={stats['样本总数']}）", fontsize=13, fontweight="bold")
+    ax2.legend(loc="upper right", fontsize=8)
+    ax2.grid(True, alpha=0.3, linestyle="--", axis="y")
+
+    plt.tight_layout()
+    out_path = os.path.join(out_dir, f"rolling_{wy}y_{sn}.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    print(f"\n📈 图表已保存至：{out_path}")
+
+# 查找指定滚动窗口期的XIRR中位数以及对应开始时间/结束时间
+def pick_widows(df_full: DataFrame, wy:int =WINDOW_YEARS, tc:str =TS_CODE, sn:str =STOCK_NAME) -> DataFrame:
+    # 3. 生成滚动窗口
+    data_start = df_full["Date"].iloc[0].strftime("%Y%m%d")
+    data_end = df_full["Date"].iloc[-1].strftime("%Y%m%d")
+    print(f"\n📅 数据范围: {data_start} → {data_end}")
+    windows = generate_rolling_windows(data_start, data_end,
+                                       wy, STEP_MONTHS)
+
+    # 4. 滚动回测
+    print(f"\n🔍 开始滚动回测（{wy}年窗口，步长{STEP_MONTHS}个月）...")
+    results = run_rolling_backtest(df_full, windows)
+
+    # 5. 统计
+    stats = compute_stats(results)
+    print_stats(stats,wy,tc,sn)
+
+    # 6. 保存 Excel
+    xlsx_path = os.path.join(out_dir, f"rolling_{wy}y_{sn}.xlsx")
+    result_df = pd.DataFrame(results)
+    stats_rows = [{"指标": k, "数值": v} for k, v in stats.items()]
+    stats_df = pd.DataFrame(stats_rows)
+    with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
+        result_df.to_excel(writer, sheet_name="滚动窗口明细", index=False)
+        stats_df.to_excel(writer, sheet_name="统计摘要", index=False)
+    print(f"\n📄 Excel 已保存至：{xlsx_path}")
+
+    # 7. 画图
+    plot_rolling(results, stats,wy,tc,sn)
+    plt.show()
+
+    start = stats["中位数对应开始日期"]
+    end = stats["中位数对应结束日期"]
+    mid_xirr = stats["XIRR中位数"]
+    mask = (df_full["Date"] >= start) & (df_full["Date"] <= end)
+    df_windows_pick = df_full[mask].copy()
+    return df_windows_pick,mid_xirr,start,end
+
+def fetch_full_data(tc:str =TS_CODE,sn:str =STOCK_NAME) -> DataFrame:
+    # 1. 获取 ETF 上市日期
+    list_date = get_etf_list_date(tc, sn)
+
+    # 2. 获取全部历史数据
+    today = pd.Timestamp.today().strftime("%Y%m%d")
+    print(f"⏳ 正在获取 {sn} ({tc}) 全量历史数据...")
+    config = BacktestConfig(
+        ts_code=tc, stock_name=sn,
+        market="ETF", start_date=list_date,
+        end_date=today,
+    )
+    df_full = fetch_data(
+        ts_code=config.ts_code, stock_name=config.stock_name,
+        market=config.market, start_date=config.start_date,
+        end_date=config.end_date, exchange=config.exchange,
+    )
+    return df_full
+
+# ============================================================
+# Main
+# ============================================================
+def main():
+    plt.rcParams["font.sans-serif"] = ["Arial Unicode MS", "SimHei", "PingFang SC"]
+    plt.rcParams["axes.unicode_minus"] = False
+
+    df_full = fetch_full_data()
+    pick_widows(df_full)
+
+
+if __name__ == "__main__":
+    main()
