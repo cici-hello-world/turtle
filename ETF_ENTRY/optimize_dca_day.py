@@ -33,7 +33,7 @@ out_dir = os.path.dirname(os.path.dirname(__file__)) + "/ETF_dca_day_pick"
 os.makedirs(out_dir, exist_ok=True)
 
 
-def pick_day(df: DataFrame,wy:int =YEARS,tc:str =TS_CODE, sn:str =STOCK_NAME):
+def pick_day(df: DataFrame, wy: int = YEARS, tc: str = TS_CODE, sn: str = STOCK_NAME, strategy: str = "balanced"):
     # 2. 扫描 1-31 日
     print(f"\n🔍 扫描 1-31 日定投日 ...")
     print(f"{'=' * 85}")
@@ -160,12 +160,12 @@ def pick_day(df: DataFrame,wy:int =YEARS,tc:str =TS_CODE, sn:str =STOCK_NAME):
     ax2.grid(True, alpha=0.3, linestyle="--")
 
     plt.tight_layout()
-    out_path = os.path.join(out_dir, f"_{wy}年周期_{sn}.png")
+    out_path = os.path.join(out_dir, f"_{wy}年周期_{sn}_{strategy}.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     print(f"\n📈 图表已保存至：{out_path}")
 
     # 保存 Excel
-    xlsx_path = os.path.join(out_dir, f"_{wy}年周期_{sn}.xlsx")
+    xlsx_path = os.path.join(out_dir, f"_{wy}年周期_{sn}_{strategy}.xlsx")
     ranking_df = pd.DataFrame(results).drop(columns=["sim"])
     best_inv_df = best["sim"]["investments"]
     with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:

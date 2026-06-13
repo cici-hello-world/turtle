@@ -15,7 +15,7 @@ import matplotlib.dates as mdates
 import matplotlib.ticker as mticker
 from pandas import DataFrame
 
-from backtest_entry.dca_utils import find_investment_dates, simulate_dca, _compute_xirr
+from backtest_entry.dca_utils import find_investment_dates, find_daily_investment_dates, simulate_dca, _compute_xirr
 from ETF_ENTRY.optimize_dca_day import START_DATE, END_DATE
 from core.config import BacktestConfig
 from core.data import fetch_data
@@ -32,6 +32,7 @@ from core.statistics import (
 TS_CODE = "513500.SH"       # 标普500ETF
 STOCK_NAME = "标普500ETF"
 MONTHLY_AMOUNT = 3000.0     # 每月定投金额（元）
+DAILY_AMOUNT = 100.0       # 每日定投金额（元）
 TARGET_DAY = 7             # 每月定投日
 PER_SHARES = 100            # 每手股数
 YEARS = 5                   # 回测年数
@@ -161,23 +162,29 @@ def calc_dca_stats(sim_result: dict, df: pd.DataFrame) -> dict:
 # ============================================================
 # 4. 输出
 # ============================================================
-def print_dca_summary(stats: dict, investments: pd.DataFrame,tc,sn,td):
+def print_dca_summary(stats: dict, investments: pd.DataFrame, tc, sn, td, mode: str = "monthly", strategy: str = "balanced"):
     """打印定投明细和统计摘要，并保存到 Excel（两个 sheet）"""
+    sheet_name = "每月定投明细" if mode == "monthly" else "每日定投明细"
+    label = "📋 每月定投明细" if mode == "monthly" else "📋 每日定投明细"
+    amount = MONTHLY_AMOUNT if mode == "monthly" else DAILY_AMOUNT
+    strategy_desc = f"每月 {td} 日定投 {amount:,.0f} 元（非交易日顺延）" if mode == "monthly" else f"每日定投 {amount:,.0f} 元"
+    suffix = "" if mode == "monthly" else "_daily"
+
     # —— 保存到 Excel ——
     stats_df = pd.DataFrame([
         {"指标": k, "数值": v}
         for k, v in stats.items()
         if k not in ("first_date", "last_date")
     ])
-    xlsx_path = os.path.join(out_dir, f"dca_{pd.to_datetime(stats["first_date"]).strftime("%Y%m")}_{pd.to_datetime(stats["last_date"]).strftime("%Y%m")}_{sn}.xlsx")
+    xlsx_path = os.path.join(out_dir, f"dca_{pd.to_datetime(stats["first_date"]).strftime("%Y%m")}_{pd.to_datetime(stats["last_date"]).strftime("%Y%m")}_{sn}_{strategy}{suffix}.xlsx")
     with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
-        investments.to_excel(writer, sheet_name="每月定投明细", index=False)
+        investments.to_excel(writer, sheet_name=sheet_name, index=False)
         stats_df.to_excel(writer, sheet_name="统计摘要", index=False)
     print(f"\n📁 数据已保存至：{xlsx_path}")
 
-    # —— 每月投资明细 ——
+    # —— 投资明细 ——
     print(f"\n{'=' * 100}")
-    print("📋 每月定投明细")
+    print(label)
     print(f"{'=' * 100}")
     print(investments.to_string(index=False))
 
@@ -188,8 +195,7 @@ def print_dca_summary(stats: dict, investments: pd.DataFrame,tc,sn,td):
     print(f"  ETF: {sn} ({tc})")
     print(f"  回测区间: {stats['first_date'].strftime('%Y-%m-%d')} → {stats['last_date'].strftime('%Y-%m-%d')}")
     print(f"  回测年数: {stats['total_years']} 年")
-    print(f"  定投策略: 每月 {td} 日定投 {MONTHLY_AMOUNT:,.0f} 元"
-          f"（非交易日顺延）")
+    print(f"  定投策略: {strategy_desc}")
     print()
 
     rows = [
@@ -216,10 +222,13 @@ def print_dca_summary(stats: dict, investments: pd.DataFrame,tc,sn,td):
         print(f"  {label:<20}  {value}")
 
 
-def plot_dca(df: pd.DataFrame, sim_result: dict, stats: dict, tc, sn, td):
+def plot_dca(df: pd.DataFrame, sim_result: dict, stats: dict, tc, sn, td, mode: str = "monthly", strategy: str = "balanced"):
     """绘制定投权益曲线"""
     equity_series = sim_result["equity_series"]
     invest_dates = pd.to_datetime(sim_result["investments"]["投资日期"])
+    amount = MONTHLY_AMOUNT if mode == "monthly" else DAILY_AMOUNT
+    suffix = "" if mode == "monthly" else "_daily"
+    title_str = f"{sn} ({tc}) 每月{td}日定投 {amount:,.0f}元" if mode == "monthly" else f"{sn} ({tc}) 每日定投 {amount:,.0f}元"
 
     fig, ax1 = plt.subplots(figsize=(18, 7))
 
@@ -240,11 +249,12 @@ def plot_dca(df: pd.DataFrame, sim_result: dict, stats: dict, tc, sn, td):
     ax1.plot(df.sort_values("Date")["Date"], invested_curve,
              color="#e67e22", linewidth=1.2, linestyle="--", alpha=0.8, label="累计投入")
 
-    # 定投点标记
+    # 定投点标记（每日模式点太密，降低透明度）
+    marker_alpha = 0.08 if mode == "daily" else 0.3
     for _, inv in sim_result["investments"].iterrows():
         if inv["买入手数"] > 0:
             ax1.axvline(pd.to_datetime(inv["投资日期"]), color="#27ae60",
-                       linewidth=0.5, alpha=0.3)
+                       linewidth=0.5, alpha=marker_alpha)
 
     # 标注最终值和 XIRR
     final_val = stats["最终市值 (¥)"]
@@ -265,8 +275,7 @@ def plot_dca(df: pd.DataFrame, sim_result: dict, stats: dict, tc, sn, td):
     plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha="right", fontsize=9)
 
     ax1.set_title(
-        f"{sn} ({tc}) 每月{td}日定投 {MONTHLY_AMOUNT:,.0f}元 "
-        f"—— {stats['total_years']}年回测 | XIRR: {stats['XIRR (%)']:+.2f}%",
+        f"{title_str} —— {stats['total_years']}年回测 | XIRR: {stats['XIRR (%)']:+.2f}%",
         fontsize=14, fontweight="bold", pad=18,
     )
     ax1.legend(loc="upper left", fontsize=10)
@@ -274,12 +283,12 @@ def plot_dca(df: pd.DataFrame, sim_result: dict, stats: dict, tc, sn, td):
 
     plt.tight_layout()
     out_path = os.path.join(out_dir,
-                            f"dca_{pd.to_datetime(stats["first_date"]).strftime("%Y%m")}_{pd.to_datetime(stats["last_date"]).strftime("%Y%m")}_{sn}.png")
+                            f"dca_{pd.to_datetime(stats["first_date"]).strftime("%Y%m")}_{pd.to_datetime(stats["last_date"]).strftime("%Y%m")}_{sn}_{strategy}{suffix}.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     print(f"\n📈 图表已保存至：{out_path}")
     plt.show()
 
-def run_result(df: DataFrame,td=TARGET_DAY,tc:str=TS_CODE,sn:str=STOCK_NAME):
+def run_result(df: DataFrame, td=TARGET_DAY, tc: str = TS_CODE, sn: str = STOCK_NAME, strategy: str = "balanced"):
     # 2. 定位每月投资日
     invest_dates = find_investment_dates(df, td)
     if invest_dates.empty:
@@ -296,8 +305,25 @@ def run_result(df: DataFrame,td=TARGET_DAY,tc:str=TS_CODE,sn:str=STOCK_NAME):
     stats = calc_dca_stats(sim_result, df)
 
     # 5. 输出
-    print_dca_summary(stats, sim_result["investments"], tc, sn, td)
-    plot_dca(df, sim_result, stats, tc, sn, td)
+    print_dca_summary(stats, sim_result["investments"], tc, sn, td, strategy=strategy)
+    plot_dca(df, sim_result, stats, tc, sn, td, strategy=strategy)
+
+
+def run_result_daily(df: DataFrame, tc: str = TS_CODE, sn: str = STOCK_NAME, strategy: str = "balanced"):
+    """每日定投版 run_result"""
+    # 每个交易日都是投资日
+    invest_dates = find_daily_investment_dates(df)
+    if invest_dates.empty:
+        print("❌ 未找到任何投资日，请检查数据")
+        return
+    print(f"✅ 共定位 {len(invest_dates)} 个定投日"
+          f"（{invest_dates['Date'].iloc[0].strftime('%Y-%m-%d')} → "
+          f"{invest_dates['Date'].iloc[-1].strftime('%Y-%m-%d')}）")
+
+    sim_result = simulate_dca(df, invest_dates, DAILY_AMOUNT, PER_SHARES)
+    stats = calc_dca_stats(sim_result, df)
+    print_dca_summary(stats, sim_result["investments"], tc, sn, 0, mode="daily", strategy=strategy)
+    plot_dca(df, sim_result, stats, tc, sn, 0, mode="daily", strategy=strategy)
 
 
 # ============================================================

@@ -22,6 +22,17 @@ def find_investment_dates(df: pd.DataFrame, target_day: int) -> pd.DataFrame:
 
 
 # ============================================================
+# 1b. 定位每日投资日（每日定投）
+# ============================================================
+def find_daily_investment_dates(df: pd.DataFrame) -> pd.DataFrame:
+    """每个交易日都是投资日，返回 (Date, Close, year_month)"""
+    df = df.copy()
+    df["year_month"] = df["Date"].dt.to_period("M")
+    result = df[["Date", "Close", "year_month"]].copy()
+    return result.sort_values("Date").reset_index(drop=True)
+
+
+# ============================================================
 # 2. DCA 模拟引擎
 # ============================================================
 def simulate_dca(df: pd.DataFrame, invest_dates: pd.DataFrame,

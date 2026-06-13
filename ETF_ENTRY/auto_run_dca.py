@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """自动化 DCA 定投三步流程：
-  1. 针对不同周期（2/3/5/8/10年）滚动回测，找最佳窗口
-  2. 用中位数 XIRR 对应的周期窗口扫描最佳定投日
+  1. 针对不同周期（2/3/5年）滚动回测，按策略选取最有预测价值的窗口
+  2. 用选中周期窗口扫描最佳定投日
   3. 用最佳定投日运行完整回测
+
+策略（切换顶部 STRATEGY 变量）：
+  - conservative: 保守型，偏爱稳健可靠的窗口
+  - balanced:     均衡型，回报与风险并重（默认）
+  - aggressive:   激进型，偏爱高回报窗口
 
 用法：
   python ETF_ENTRY/auto_run_dca.py
@@ -22,16 +27,20 @@ from ETF_ENTRY.run_dca_backtest import run_result
 # 配置
 # ============================================================
 YEARS_LIST = [2, 3, 5]
-STEP_MONTHS = 1
-# TS_CODE = "513300.SH"
-# STOCK_NAME = "纳斯达克ETF"
-TS_CODE = "513500.SH"
-STOCK_NAME = "标普500ETF"
+STRATEGY = "aggressive"  # conservative | balanced | aggressive
+TS_CODE = "513300.SH"
+STOCK_NAME = "纳斯达克ETF"
+# TS_CODE = "513500.SH"
+# STOCK_NAME = "标普500ETF"
+
 
 # ============================================================
 # Main
 # ============================================================
 def main():
+    strategy_names = {"conservative": "保守型", "balanced": "均衡型", "aggressive": "激进型"}
+    print(f"🎯 策略模式: {strategy_names.get(STRATEGY, STRATEGY)}")
+
     plt.rcParams["font.sans-serif"] = ["Arial Unicode MS", "SimHei", "PingFang SC"]
     plt.rcParams["axes.unicode_minus"] = False
 
@@ -46,7 +55,7 @@ def main():
 
     # ============================================================
     # 1. 循环周期list，pick_windows
-    #    对每个窗口年限跑滚动回测，收集 (years, df_windows_pick, xirr)
+    #    对每个窗口年限跑滚动回测，按策略选最优窗口
     # ============================================================
     period_results = []  # list[dict]: years, df, xirr
     for wy in YEARS_LIST:
@@ -54,29 +63,37 @@ def main():
         print(f"🔍 滚动回测 —— {wy}年窗口")
         print(f"{'=' * 65}")
 
-        df_windows_pick,mid_xirr,start,end = pick_widows(df_full,wy,TS_CODE,STOCK_NAME)
+        df_windows_pick, pick_xirr, start, end = pick_widows(
+            df_full, wy, TS_CODE, STOCK_NAME, strategy=STRATEGY)
+
+        if df_windows_pick is None:
+            print(f"  ⚠️ {wy}年窗口数据不足，跳过")
+            continue
+
         period_results.append({
             "years": wy,
             "df": df_windows_pick,
-            "xirr": mid_xirr,
+            "xirr": pick_xirr,
         })
-        xirr_str = f"{mid_xirr:.2f}%" if not np.isnan(mid_xirr) else "N/A"
-        print(f"  → {wy}年窗口中位数 XIRR: {xirr_str}"
+        xirr_str = f"{pick_xirr:.2f}%" if not np.isnan(pick_xirr) else "N/A"
+        print(f"  → {wy}年窗口选取 XIRR: {xirr_str}"
               f"（{start.strftime('%Y-%m-%d')} → {end.strftime('%Y-%m-%d')}）")
 
+    if not period_results:
+        print("❌ 没有足够数据生成任何窗口，退出")
+        return
+
     # ============================================================
-    # 2. 用在1返回的XIRR数组的中位数对应的周期和df_windows_pick去调pick_day
+    # 2. 用在1返回的XIRR数组中位数对应的周期和df_windows_pick去调pick_day
     # ============================================================
-    # 按 XIRR 排序，取中位数位置对应的那组结果
     sorted_by_xirr = sorted(period_results, key=lambda r: r["xirr"])
     best = sorted_by_xirr[len(sorted_by_xirr) // 2]
 
     print(f"\n{'=' * 65}")
-    print(f"🏆 选定中位数 XIRR 周期: {best['years']}年 "
-          f"(XIRR: {best['xirr']:.2f}%)")
+    print(f"🏆 选定周期: {best['years']}年 (选取XIRR: {best['xirr']:.2f}%)")
     print(f"{'=' * 65}")
 
-    day_pick = pick_day(best["df"], wy=best["years"], tc=TS_CODE, sn=STOCK_NAME)
+    day_pick = pick_day(best["df"], wy=best["years"], tc=TS_CODE, sn=STOCK_NAME, strategy=STRATEGY)
     print(f"\n📌 最佳定投日: 每月 {day_pick} 日")
 
     # ============================================================
@@ -85,7 +102,7 @@ def main():
     print(f"\n{'=' * 65}")
     print(f"🚀 运行最终回测: {best['years']}年周期, 每月{day_pick}日定投")
     print(f"{'=' * 65}")
-    run_result(best["df"], td=day_pick,tc=TS_CODE, sn=STOCK_NAME)
+    run_result(best["df"], td=day_pick, tc=TS_CODE, sn=STOCK_NAME, strategy=STRATEGY)
 
 
 if __name__ == "__main__":
