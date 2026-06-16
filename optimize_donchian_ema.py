@@ -38,8 +38,8 @@ warnings.filterwarnings("ignore")
 _raw = sys.argv[1].upper() if len(sys.argv) > 1 else os.environ.get("TURTLE_MARKET", "HK")
 MARKET = _raw if _raw in ("HK", "A") else "HK"
 
-START_DATE = "20180609"
-END_DATE = "20260609"
+START_DATE = "20180615"
+END_DATE = "20260615"
 INITIAL_CAPITAL = 200000.0
 RISK_PERCENT = 1.0
 N_VALUE = 2.0
@@ -54,75 +54,6 @@ ATR_PERIOD = 14
 FAST_PERIODS = [20, 25, 30, 40, 50]
 SLOW_PERIODS = [50, 60, 80, 100, 150, 200, 250, 300, 350]
 
-# 港股流动性候选标的(近一年流动性前30)
-HK_CANDIDATES = [
-# "09988.HK",
-# "00700.HK",
-# "01810.HK",
-# "03690.HK",
-# "00981.HK",
-# "09992.HK",
-# "01211.HK",
-# "01024.HK",
-# "01347.HK",
-# "02318.HK",
-# "00388.HK",
- "00939.HK",
-# "01299.HK",
-# "02899.HK",
-# "02628.HK",
-# "01788.HK",
-# "01801.HK",
-# "09660.HK",
-# "09618.HK",
-# "09888.HK",
-# "09868.HK",
-# "00005.HK",
-# "00883.HK",
-# "02015.HK",
-# "00941.HK",
-# "00020.HK",
-# "01093.HK",
-# "02269.HK",
-# "09926.HK",
-# "01398.HK",
-#  "06181.HK",
-]
-
-# A股近一年流动性前30
-A_CANDIDATES = [
-# "300308.SZ",
-# "300502.SZ",
-# "300476.SZ",
-# "688256.SH",
-# "300750.SZ",
-# "300274.SZ",
-# "601138.SH",
-# "300059.SZ",
-# "300394.SZ",
-# "002475.SZ",
-# "603986.SH",
-# "601899.SH",
-# "600111.SH",
-# "688981.SH",
-# "688041.SH",
-# "002384.SZ",
-# "002050.SZ",
-# "000988.SZ",
-# "688008.SH",
-# "600519.SH",
-# "000063.SZ",
-# "300058.SZ",
-# "002463.SZ",
-# "600089.SH",
-# "002594.SZ",
-# "688820.SH",
-# "603019.SH",
- "601318.SH",
-# "300136.SZ",
-# "688525.SH",
-]
-
 # 输出路径
 _suffix = "a" if MARKET == "A" else "hk"
 OUTPUT_CSV = os.path.join(os.path.dirname(__file__), f"donchian_param_analysis_pyramid_{_suffix}.csv")
@@ -134,137 +65,46 @@ OUTPUT_CSV = os.path.join(os.path.dirname(__file__), f"donchian_param_analysis_p
 if MARKET == "A":
     import akshare as _dummy  # noqa (仅港股需要)
 
-    # def fetch_adj_factor(pro, ts_code: str) -> pd.DataFrame:
-    #     """拉取 A 股复权因子"""
-    #     return pro.adj_factor(ts_code=ts_code)
-
-    # def apply_adj_factor_a(df: pd.DataFrame,
-    #                         adj: pd.DataFrame) -> pd.DataFrame:
-    #     """用 adj_factor 生成 A 股前复权 OHLC"""
-    #     df = df.merge(adj[['trade_date', 'adj_factor']], on='trade_date', how='left')
-    #     # adj_factor 从后往前填充
-    #     last = 1.0
-    #     filled = []
-    #     for i in range(len(df) - 1, -1, -1):
-    #         v = df['adj_factor'].iloc[i]
-    #         if pd.notna(v):
-    #             last = float(v)
-    #         filled.append(last)
-    #     filled.reverse()
-    #     df['adj_factor'] = filled
-    #     last_adj = df['adj_factor'].iloc[-1]
-    #     for col in ['close', 'high', 'low', 'open']:
-    #         if col in df.columns:
-    #             df[col] = (df[col] * df['adj_factor']/last_adj).round(4)
-    #     return df
-
-    def fetch_top10_by_liquidity(pro, candidates: list[str],
-                                  start: str, end: str):
-        """A股: daily  → 按日均成交额排序 TOP10"""
+    def fetch_liquidity(pro, start: str, end: str):
+        """A股: 沪深300+中证500成分股 → 按日均成交额筛选>1亿"""
+        # 获取沪深300成分股
+        idx300 = pro.index_weight(index_code='000300.SH', start_date='20260601', end_date='20260615')
+        codes_300 = idx300['con_code'].unique().tolist()
+        # 获取中证500成分股
+        idx500 = pro.index_weight(index_code='000905.SH', start_date='20260601', end_date='20260615')
+        codes_500 = idx500['con_code'].unique().tolist()
+        # 合并去重
+        candidates = list(set(codes_300 + codes_500))
         rank = []
         for ts_code in candidates:
-            # 拉不复权日线
+            # 拉日线
             df = _fetch_a_share(pro, ts_code, start, end)
-            avg_amt = df["Amount"].mean()
-            rank.append((ts_code, avg_amt, df))
+            avg_amt = df["Amount"].mean() #单位千元
+            if avg_amt > 100_000:  # 日均成交额 > 1亿
+                rank.append((ts_code, avg_amt, df))
         rank.sort(key=lambda x: x[1], reverse=True)
-        return rank[:10]
+        print(f"按日均成交额筛选>1亿的股票有{len(rank)}只")
+        return rank
 
 else:
-    # 港股: hk_daily_adj + akshare 补权
-    import akshare as ak
+    def fetch_liquidity(pro, start: str, end: str):
+        """港股: 恒生指数成分股 → 按日均成交额筛选>1亿"""
+        # 获取恒生指数成分股
 
-    # ============================================================
-    # 港股: 分红解析 & adj_factor 补权
-    # ============================================================
-    # def parse_dividend_hkd(scheme: str) -> float | None:
-    #     """从 akshare 分红方案文本中提取港币每股现金分红"""
-    #     if not isinstance(scheme, str):
-    #         return None
-    #     m = re.search(r'相当于港币([\d.]+)元', scheme)
-    #     if m: return float(m.group(1))
-    #     m = re.search(r'每股派港币([\d.]+)元', scheme)
-    #     if m: return float(m.group(1))
-    #     return None
-
-
-    # def find_missing_dividends(df_adj: pd.DataFrame, code: str) -> list[tuple[str, float]]:
-    #     """对比 Tushare adj_factor 最后变动日期与 akshare 分红记录"""
-    #     d = df_adj.copy()
-    #     d['adj_diff'] = d['adj_factor'].diff().abs()
-    #     changes = d[d['adj_diff'] > 1e-8]
-    #     last_adj_date = str(changes['trade_date'].iloc[-1])[:10].replace('-', '') \
-    #         if not changes.empty else None
-    #
-    #     ak_code = code.replace('.HK', '')
-    #     try:
-    #         div = ak.stock_hk_dividend_payout_em(symbol=ak_code)
-    #     except Exception:
-    #         return []
-    #
-    #     missing = []
-    #     for _, r in div.iterrows():
-    #         ex_date_str = str(r['除净日']).replace('-', '')[:8]
-    #         scheme = str(r['分红方案'])
-    #         if ex_date_str > END_DATE:
-    #             continue
-    #         if '分派' in scheme and '每股派' not in scheme:
-    #             continue
-    #         if '送股' in scheme or '转股' in scheme:
-    #             continue
-    #         div_hkd = parse_dividend_hkd(scheme)
-    #         if div_hkd is None or div_hkd <= 0:
-    #             continue
-    #         is_missing = (last_adj_date is None) or (ex_date_str > last_adj_date)
-    #         if is_missing:
-    #             missing.append((ex_date_str, div_hkd))
-    #     return missing
-
-
-    # def apply_missing_adj(df: pd.DataFrame,
-    #                       missing: list[tuple[str, float]]) -> pd.DataFrame:
-    #     """对缺失的除权日，计算并应用 adj_factor 修正"""
-    #     df = df.copy()
-    #     df['adj_factor_corrected'] = df['adj_factor'].astype(float)
-    #     n = len(df)
-    #     for ex_date_str, div_hkd in missing:
-    #         ex_dt = pd.Timestamp(ex_date_str)
-    #         pos = None
-    #         for i in range(n):
-    #             if df.iloc[i]['trade_date'] >= ex_dt:
-    #                 pos = i
-    #                 break
-    #         if pos is None:
-    #             continue
-    #         close_ex = float(df.iloc[pos]['close'])
-    #         if pd.isna(close_ex) or close_ex <= 0:
-    #             continue
-    #         correction = close_ex / (close_ex + div_hkd)
-    #         if pos > 0:
-    #             col_idx = df.columns.get_loc('adj_factor_corrected')
-    #             df.iloc[:pos, col_idx] *= correction
-    #     return df
-
-
-    # def hk_compute_adjusted_prices(df: pd.DataFrame) -> pd.DataFrame:
-    #     """用 adj_factor_corrected 生成前复权 OHLC"""
-    #     adj = df['adj_factor_corrected'].values
-    #     for col in ['close', 'high', 'low', 'open']:
-    #         if col in df.columns:
-    #             df[col] = (df[col] * adj).round(4)
-    #     return df
-
-
-    def fetch_top10_by_liquidity(pro, candidates: list[str],
-                                  start: str, end: str):
-        """港股: hk_daily → 按日均成交额排序 TOP10"""
+        idx = pro.hk_daily(trade_date='20260615')
+        candidates = idx[idx["amount"] > 1e8]["ts_code"].tolist()
         rank = []
         for ts_code in candidates:
-            df = _fetch_hk_share(pro, ts_code, start, end)
-            avg_amt = df["Amount"].mean()
-            rank.append((ts_code, avg_amt, df))
+            try:
+                df = _fetch_hk_share(pro, ts_code, start, end)
+            except ValueError:
+                continue
+            avg_amt = df["Amount"].mean() #单位港元
+            if avg_amt > 100_000_000:  # 日均成交额 > 1亿 (HKD)
+                rank.append((ts_code, avg_amt, df))
         rank.sort(key=lambda x: x[1], reverse=True)
-        return rank[:30]
+        print(f"按日均成交额筛选>1亿的股票有{len(rank)}只")
+        return rank
 
 # ---- else 块结束，以下是共享函数 ----
 
@@ -702,21 +542,14 @@ def main():
         return
     pro = ts.pro_api(token)
 
-    # ---- 1. 筛选流动性 TOP10 ----
+    # ---- 1. 筛选流动性 >1亿 ----
     currency = "CNY" if MARKET == "A" else "HKD"
     market_label = "A股" if MARKET == "A" else "港股"
     print("=" * 80)
-    print(f"🏆 近一年{market_label}日均成交额 TOP10")
+    print(f"🏆 近一年{market_label}日均成交额 >1亿")
     print("=" * 80)
 
-    if MARKET == "A":
-        # A股蓝筹候选池 (沪深300核心 + 行业龙头)
-        candidates = A_CANDIDATES
-        print(f"   候选池: A股近一年流动性最强 {len(candidates)} 只")
-    else:
-        candidates = HK_CANDIDATES
-
-    top10 = fetch_top10_by_liquidity(pro, candidates, START_DATE, END_DATE)
+    top10 = fetch_liquidity(pro, START_DATE, END_DATE)
 
     if MARKET == "A":
         sb = pro.stock_basic(list_status='L', fields='ts_code,name')

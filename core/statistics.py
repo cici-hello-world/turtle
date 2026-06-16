@@ -151,20 +151,24 @@ def _compute_r_cubed(equity_series: pd.Series, reg_annual_return: float,
     return reg_annual_return / lamd
 
 
-def _compute_robust_sharpe(equity_series: pd.Series) -> float:
-    """稳健夏普比率：用中位数和 IQR 替代均值和标准差"""
-    if len(equity_series) < 2:
+def _compute_robust_sharpe(equity_series: pd.Series, reg_annual_return: float,
+                          equity_dates: pd.Series | None) -> float:
+    """稳健夏普比率 = 回归年度回报率 / 年度化的月度回报标准差"""
+    if len(equity_series) < 2 or reg_annual_return == 0:
         return 0
-    returns = equity_series.pct_change().dropna()
-    if len(returns) < 2:
+    if equity_dates is None or len(equity_dates) != len(equity_series):
         return 0
-    med_return = returns.median()
-    iqr = returns.quantile(0.75) - returns.quantile(0.25)
-    if iqr <= 0:
+    # 构建 DatetimeIndex 后按月末重采样
+    eq = pd.Series(equity_series.values, index=pd.DatetimeIndex(equity_dates))
+    monthly_eq = eq.resample("ME").last().dropna()
+    if len(monthly_eq) < 3:
         return 0
-    # 正态分布下 IQR ≈ 1.349 * σ
-    robust_vol = iqr / 1.349
-    return (med_return / robust_vol) * np.sqrt(252)
+    monthly_returns = monthly_eq.pct_change().dropna()
+    monthly_std = monthly_returns.std()
+    if monthly_std <= 0:
+        return 0
+    annualized_vol = monthly_std * np.sqrt(12)
+    return reg_annual_return / annualized_vol
 
 
 def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[float]) -> dict:
@@ -262,7 +266,7 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
     reg_return, r_squared = _compute_regression_metrics(equity_series, equity_dates)
 
     # 稳健夏普比率
-    robust_sharpe = _compute_robust_sharpe(equity_series)
+    robust_sharpe = _compute_robust_sharpe(equity_series, reg_return, equity_dates)
 
     # R立方
     r_cubed = _compute_r_cubed(equity_series, reg_return, equity_dates)

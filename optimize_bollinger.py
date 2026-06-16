@@ -221,13 +221,12 @@ def main():
     label = "A股" if MARKET == "A" else "港股"
     currency = "CNY" if MARKET == "A" else "HKD"
 
-    # ---- 1. 获取 TOP10 流动性股票 ----
+    # ---- 1. 获取日均成交额>1亿 股票 ----
     ode = _load_ode_module()
-    candidates = ode.A_CANDIDATES if MARKET == "A" else ode.HK_CANDIDATES
     print("=" * 80)
-    print(f"🏆 近一年{label}日均成交额 TOP10")
+    print(f"🏆 近一年{label}日均成交额 >1亿")
     print("=" * 80)
-    top10_raw = ode.fetch_top10_by_liquidity(pro, candidates, ode.START_DATE, ode.END_DATE)
+    top10_raw = ode.fetch_liquidity(pro, ode.START_DATE, ode.END_DATE)
 
     name_map = _get_name_map(pro)
     for i, (code, amt, _) in enumerate(top10_raw, 1):

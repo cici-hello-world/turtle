@@ -87,11 +87,11 @@ def calc_dca_stats(sim_result: dict, df: pd.DataFrame) -> dict:
     else:
         sharpe = 0
 
-    # 稳健夏普
-    robust_sharpe = _compute_robust_sharpe(equity_series)
-
     # 回归年度回报率 & R²
     reg_return, r_squared = _compute_regression_metrics(equity_series, equity_dates)
+
+    # 稳健夏普
+    robust_sharpe = _compute_robust_sharpe(equity_series, reg_return, equity_dates)
 
     # R立方
     r_cubed = _compute_r_cubed(equity_series, reg_return, equity_dates)
