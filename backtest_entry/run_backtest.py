@@ -45,6 +45,7 @@ def run(config: BacktestConfig):
             channel_type=config.channel_type,
             bb_period=config.bb_period,
             bb_k=config.bb_k,
+            am_ma_period=config.am_ma_period,
         )
 
         # 3. 运行回测
@@ -72,25 +73,38 @@ if __name__ == "__main__":
     #     ema_fast=25,
     #     ema_slow=200,
     # )
-    config=BacktestConfig(
-        # ========== 股票信息 ==========
-        ts_code="601919.SH",
-        stock_name="中远海控",
-        ema_fast=30,
-        ema_slow=150,
-    )
+    # config=BacktestConfig(
+    #     # ========== 股票信息 ==========
+    #     ts_code="601919.SH",
+    #     stock_name="中远海控",
+    #     ema_fast=30,
+    #     ema_slow=150,
+    # )
     # ================ 泡泡玛特 ================
     # config = BacktestConfig(
     #     ts_code="09992.HK",
     #     stock_name="泡泡玛特",
     #     market="HK",
     #     mode="long_more",
-    #     years=8,
+    #     years=5,
     #     per_shares=200,
+    #     initial_capital=400000,
     #     max_pyramid=5,
     #     ema_fast=0,
     #     ema_slow=0,
     #     skip_first_add = True
+    # )
+    # config = BacktestConfig(
+    #     ts_code="09992.HK",
+    #     stock_name="泡泡玛特",
+    #     market="HK",
+    #     mode="anti_martingale",
+    #     initial_capital =400000,
+    #     years=5,
+    #     per_shares=200,
+    #     ema_fast=25,
+    #     ema_slow=80,
+    #     am_ma_period =50
     # )
     # config = BacktestConfig(
     #     ts_code="300274.SZ",
@@ -153,7 +167,13 @@ if __name__ == "__main__":
     #     ema_fast=20,
     #     ema_slow=50,
     # )
-
+    config = BacktestConfig(
+        ts_code="603986.SH",
+        stock_name="兆易创新",
+        ema_fast=0,
+        ema_slow=0,
+        initial_capital=400000,
+    )
     # config = BacktestConfig(
     #     ts_code="002475.SZ",
     #     stock_name="立讯精密",
@@ -199,14 +219,15 @@ if __name__ == "__main__":
     #     ema_fast=20,
     #     ema_slow=80,
     # )
+
     # config = BacktestConfig(
     #     ts_code="06181.HK",
     #     stock_name="老铺",  # 2018-09-20开市
     #     market="HK",
-    #     mode="short_more",
+    #     mode="long_more",
     #     ema_fast=0,
     #     ema_slow=0,
-    #     initial_capital=1200000,
+    #     initial_capital=400000,
     # )
     # config = BacktestConfig(
     #     ts_code="09992.HK",

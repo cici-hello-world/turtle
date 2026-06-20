@@ -39,9 +39,14 @@ class BacktestConfig:
     bb_k: float = 2.0               # 布林线标准差倍数（仅 bollinger）
 
     # ========== 策略模式 ==========
-    mode: str = "long_more"  # "long" | "long_more" | "both"
+    mode: str = "long_more"  # "long" | "long_more" | "short_more" | "both" | "anti_martingale"
     max_pyramid: int = 5  # 最大加仓次数（仅 long_more）
     skip_first_add: bool = False  # 跳过首次加仓，总加仓次数-1（仅 long_more）
+
+    # ========== Anti-Martingale 参数（仅 anti_martingale 模式） ==========
+    am_ma_period: int = 50               # MA 均线周期，用于入场/出场信号
+    am_risk_multiplier: float = 1.5      # 盈利后风险乘数
+    am_max_multiplier: float = 4.0       # 最大风险乘数上限
 
     # ========== 输出 ==========
     output_dir: str = ""  # 留空自动推导
@@ -71,6 +76,7 @@ class BacktestConfig:
                     "long_more": "a_stock_long_more_result",
                     "short_more": "a_stock_shot_more_result",
                     "both": "a_stock_both_result",
+                    "anti_martingale": "a_stock_anti_martingale_result",
                 }
             elif self.market == "ETF":
                 suffix_map = {
@@ -78,6 +84,7 @@ class BacktestConfig:
                     "long_more": "ETF_long_more_result",
                     "short_more": "ETF_shot_more_result",
                     "both": "ETF_both_result",
+                    "anti_martingale": "ETF_anti_martingale_result",
                 }
             else:
                 suffix_map = {
@@ -85,6 +92,7 @@ class BacktestConfig:
                     "long_more": "hk_stock_long_more_result",
                     "short_more": "hk_stock_shot_more_result",
                     "both": "hk_stock_both_result",
+                    "anti_martingale": "hk_stock_anti_martingale_result",
                 }
             self.output_dir = suffix_map.get(self.mode, f"{self.market.lower()}_stock_backtest")
 

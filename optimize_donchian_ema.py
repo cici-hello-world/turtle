@@ -38,8 +38,8 @@ warnings.filterwarnings("ignore")
 _raw = sys.argv[1].upper() if len(sys.argv) > 1 else os.environ.get("TURTLE_MARKET", "HK")
 MARKET = _raw if _raw in ("HK", "A") else "HK"
 
-START_DATE = "20180615"
-END_DATE = "20260615"
+START_DATE = "20180618"
+END_DATE = "20260618"
 INITIAL_CAPITAL = 200000.0
 RISK_PERCENT = 1.0
 N_VALUE = 2.0

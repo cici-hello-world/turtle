@@ -26,10 +26,10 @@ from ETF_ENTRY.run_dca_backtest import run_result
 # ============================================================
 # 配置
 # ============================================================
-YEARS_LIST = [2, 3, 5]
-STRATEGY = "aggressive"  # conservative | balanced | aggressive
-TS_CODE = "513300.SH"
-STOCK_NAME = "纳斯达克ETF"
+YEARS_LIST = [2, 3, 5, 8]
+STRATEGY = "balanced"  # conservative | balanced | aggressive
+TS_CODE = "159941.SZ"
+STOCK_NAME = "纳指ETF广发"
 # TS_CODE = "513500.SH"
 # STOCK_NAME = "标普500ETF"
 
@@ -55,7 +55,7 @@ def main():
 
     # ============================================================
     # 1. 循环周期list，pick_windows
-    #    对每个窗口年限跑滚动回测，按策略选最优窗口
+    #    对每个窗口年限跑滚动回测，按策略选对应年限的最优窗口
     # ============================================================
     period_results = []  # list[dict]: years, df, xirr
     for wy in YEARS_LIST:
@@ -84,7 +84,7 @@ def main():
         return
 
     # ============================================================
-    # 2. 用在1返回的XIRR数组中位数对应的周期和df_windows_pick去调pick_day
+    # 2. 将每个窗口年限的最优XIRR中位数作为最佳窗口年限
     # ============================================================
     sorted_by_xirr = sorted(period_results, key=lambda r: r["xirr"])
     best = sorted_by_xirr[len(sorted_by_xirr) // 2]
@@ -97,7 +97,7 @@ def main():
     print(f"\n📌 最佳定投日: 每月 {day_pick} 日")
 
     # ============================================================
-    # 3. 用2返回的day_pick和1返回的df_windows_pick去调run_result
+    # 3. 用2返回的最佳定投日和1返回的最佳窗口周期去跑run_result
     # ============================================================
     print(f"\n{'=' * 65}")
     print(f"🚀 运行最终回测: {best['years']}年周期, 每月{day_pick}日定投")

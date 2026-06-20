@@ -1,9 +1,11 @@
 """海龟策略回测引擎
 
-支持三种模式:
-- "long":      不加仓做多
-- "long_more": 加仓做多（金字塔）
-- "both":      多空双向
+支持多种模式:
+- "long":             不加仓做多
+- "long_more":        加仓做多（金字塔）
+- "short_more":       加仓做空（金字塔）
+- "both":             多空双向
+- "anti_martingale":  反马丁格尔（MA信号 + 跨交易仓位调整）
 """
 
 import numpy as np
@@ -20,6 +22,8 @@ def run_backtest(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
         return _run_short_with_pyramid(df, config)
     elif config.mode == "both":
         return _run_long_short(df, config)
+    elif config.mode == "anti_martingale":
+        return _run_anti_martingale(df, config)
     else:
         raise ValueError(f"未知的策略模式: {config.mode}")
 
@@ -156,6 +160,25 @@ def _check_both_exit(row, pos, stop_loss_price, config):
         return _check_long_exit(row, stop_loss_price, config)
     else:  # short
         return _check_short_exit(row, stop_loss_price, config)
+
+
+# ==================== Anti-Martingale 信号函数（独立于通道注册表） ====================
+
+def _am_entry_triggered(row, config) -> bool:
+    """Anti-Martingale 入场信号：Close > MA(period)"""
+    ma = row.get("AM_MA")
+    if pd.isna(ma):
+        return False
+    return row["Close"] > ma
+
+
+def _am_exit_triggered(row, config) -> bool:
+    """Anti-Martingale 出场信号：Close < MA(period)"""
+    ma = row.get("AM_MA")
+    if pd.isna(ma):
+        return False
+    return row["Close"] < ma
+
 
 # ==================== 输出格式化 ====================
 
@@ -600,5 +623,122 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
             cost_basis, pnl, capital, "强制平仓",
         ))
         # _print_force_close(label, pnl, capital)
+
+    return trades, equity_curve
+
+
+# ==================== 反马丁格尔策略 (Anti-Martingale) ====================
+
+def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
+    """反马丁格尔策略：
+    - 入场：Close > MA(am_ma_period) 且 EMA 趋势过滤器允许
+    - 出场：Close < MA(am_ma_period) 或 硬止损 (N×ATR)
+    - 仓位：盈利后下笔风险乘以 am_risk_multiplier，亏损后重置为 1.0
+    """
+    label = "Anti-Martingale"
+    ps = config.per_shares
+
+    trades = []
+    capital = config.initial_capital
+    equity_curve = [config.initial_capital]
+
+    # ---- 反马丁格尔状态：跨交易的仓位乘数 ----
+    risk_multiplier = 1.0
+
+    # ---- 持仓状态 ----
+    pos = None
+    entry_price = 0.0
+    stop_loss_price = 0.0
+    stop_dist = 0.0
+    current_shares = 0
+    entry_date = None
+
+    start_index = max(config.am_ma_period, config.atr_period) + 1
+
+    for i in range(start_index, len(df)):
+        row = df.iloc[i]
+        current_date = row["Date"]
+
+        if pos is None:
+            # ATR 校验
+            if pd.isna(row["ATR"]) or row["ATR"] == 0:
+                continue
+            atr = row["ATR"]
+            stop_dist = config.n_value * atr
+
+            # ---- 反马丁格尔：动态风险比例 ----
+            effective_risk = config.risk_per_trade * risk_multiplier
+            shares = _calc_shares(capital, effective_risk, stop_dist, ps)
+            if shares <= 0:
+                continue
+
+            # 入场信号：Close > MA + EMA趋势过滤器
+            if _am_entry_triggered(row, config) and _ema_trend_ok(row, config):
+                cost = row["Close"] * shares * ps
+                if not _can_afford(cost, capital):
+                    continue
+                pos = "long"
+                entry_price = row["Close"]
+                stop_loss_price = entry_price - stop_dist
+                current_shares = shares
+                entry_date = current_date
+                capital -= cost
+
+        else:
+            exit_price = None
+            exit_reason = ""
+
+            # 1. 硬止损（优先）
+            if row["Close"] < stop_loss_price:
+                exit_price = row["Close"]
+                exit_reason = "Hard Stop Loss (N×ATR)"
+
+            # 2. MA 趋势反转出场
+            if not exit_reason and _am_exit_triggered(row, config):
+                exit_price = row["Close"]
+                exit_reason = "Trend Reversal (MA)"
+
+            if exit_reason:
+                cost_basis = entry_price * current_shares * ps
+                pnl = (exit_price - entry_price) * current_shares * ps
+                capital += exit_price * current_shares * ps
+
+                trades.append(_build_trade(
+                    entry_date, current_date, "Long",
+                    entry_price, exit_price, current_shares,
+                    cost_basis, pnl, capital, exit_reason,
+                    stop_dist=stop_dist,
+                ))
+                equity_curve.append(capital)
+
+                # ---- 反马丁格尔：根据上一笔结果更新乘数 ----
+                if pnl > 0:
+                    risk_multiplier = min(
+                        risk_multiplier * config.am_risk_multiplier,
+                        config.am_max_multiplier,
+                    )
+                else:
+                    risk_multiplier = 1.0
+
+                pos = None
+                current_shares = 0
+                entry_price = 0.0
+                stop_loss_price = 0.0
+                entry_date = None
+
+    # ---- 强制平仓 ----
+    if pos == "long":
+        last_price = df.iloc[-1]["Close"]
+        last_date = df.iloc[-1]["Date"]
+        cost_basis = entry_price * current_shares * ps
+        pnl = (last_price - entry_price) * current_shares * ps
+        capital += last_price * current_shares * ps
+
+        trades.append(_build_trade(
+            entry_date, last_date, "Long",
+            entry_price, last_price, current_shares,
+            cost_basis, pnl, capital, "强制平仓",
+            stop_dist=stop_dist,
+        ))
 
     return trades, equity_curve

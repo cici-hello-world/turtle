@@ -14,6 +14,7 @@ def compute_indicators(
     channel_type: str = "donchian",
     bb_period: int = 20,
     bb_k: float = 2.0,
+    am_ma_period: int = 0,
 ) -> pd.DataFrame:
     """在 DataFrame 上添加海龟策略所需指标列
 
@@ -52,5 +53,9 @@ def compute_indicators(
             df["EMA_Fast"] = df["Close"].ewm(span=ema_fast, adjust=False).mean()
         if ema_slow > 0:
             df["EMA_Slow"] = df["Close"].ewm(span=ema_slow, adjust=False).mean()
+
+    # Anti-Martingale MA（仅在 am_ma_period > 0 时计算，与通道类型无关）
+    if am_ma_period > 0:
+        df["AM_MA"] = df["Close"].rolling(window=am_ma_period, min_periods=am_ma_period).mean()
 
     return df

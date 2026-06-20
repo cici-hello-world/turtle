@@ -37,6 +37,8 @@ def save_excel_report(df: pd.DataFrame, trades: list[dict], stats: dict, config)
     prefix = "Backtest_Report"
     if config.mode == "long_more":
         prefix += "_more"
+    if config.mode == "anti_martingale":
+        prefix += "_AM"
     report_path = os.path.join(
         config.output_dir,
         f"{prefix}_{config.channel_type}_{config.ts_code}_{config.start_date}起_{config.risk_percent}%单笔风险.xlsx",

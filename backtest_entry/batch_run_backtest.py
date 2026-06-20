@@ -34,7 +34,7 @@ from itertools import product
 warnings.filterwarnings("ignore")
 
 from core.config import BacktestConfig
-from core.data import fetch_data
+from core.data import fetch_data, _fetch_a_share, _fetch_hk_share
 from core.indicators import compute_indicators
 from core.engine import run_backtest
 from core.statistics import calc_stats
@@ -46,13 +46,16 @@ from core.statistics import calc_stats
 CHANNEL_TYPE = "donchian"  # "donchian" | "bollinger" — 切换通道类型
 MODE = "long_more"
 SCAN_ALL = False #是否扫描全市场最优参数
+STOCK_SOURCE = "ai_industry"  # "liquidity" | "ai_industry" — 股票池来源
+START_DATE = "20180618"
+END_DATE = "20260618"
 MAX_PYRAMID = 5
 ENTRY_PERIOD = 20
 EXIT_PERIOD = 10
 ATR_PERIOD = 14
 N_VALUE = 2.0
 RISK_PERCENT = 1.0
-INITIAL_CAPITAL = 200000.0
+INITIAL_CAPITAL = 400000.0
 YEARS = 8
 FAST_PERIODS = [20, 25, 30, 40, 50]
 SLOW_PERIODS = [50, 60, 80, 100, 150, 200, 250, 300, 350]
@@ -90,6 +93,169 @@ def get_stocks(pro, market: str) -> list[tuple[str, float, object]]:
     """获取指定市场日均成交额>1亿的股票，返回 [(ts_code, avg_amt, df_raw), ...]"""
     ode = load_ode_module(market)
     return ode.fetch_liquidity(pro, ode.START_DATE, ode.END_DATE)
+
+
+def get_ai_stocks(pro, market: str) -> list[tuple[str, float, object]]:
+    """获取AI产业相关股票，返回 [(ts_code, avg_amt, df_raw), ...]
+
+    A股: 通过 tushare stock_basic 行业分类筛选AI相关产业
+    港股: 通过恒生科技指数 + hk_basic AI关键词筛选
+    """
+    if market == "A":
+        # —— AI相关申万行业 ——
+        ai_industries = [
+            '半导体',       # 芯片/半导体
+            '软件服务',     # 软件/AI应用
+            'IT设备',       # IT硬件
+            '互联网',       # 互联网
+            '元器件',       # 电子元器件
+            '通信设备',     # 5G/通信
+            '电器仪表',     # 智能仪表/机器人部件
+            '电脑设备',     # 计算机设备（兼容不同版本）
+            '电子制造',     # 电子制造
+        ]
+        # —— AI相关个股名称关键词（补充行业分类未覆盖的） ——
+        ai_name_keywords = [
+            '智能', '机器人', '数据', '云', '芯片', '光电',
+            'AI', '人工智能', '算力', '自动驾驶', '无人驾驶',
+            '物联网', '虚拟现实', '增强现实',
+        ]
+
+        # 获取全部A股列表
+        df_basic = pro.stock_basic(list_status='L',
+                                   fields='ts_code,name,industry')
+        ai_codes = set()
+
+        # 1. 按行业筛选
+        for _, row in df_basic.iterrows():
+            industry = str(row.get('industry', ''))
+            name = str(row.get('name', ''))
+            ts_code = row['ts_code']
+            if any(ind in industry for ind in ai_industries):
+                ai_codes.add(ts_code)
+            elif any(kw in name for kw in ai_name_keywords):
+                ai_codes.add(ts_code)
+
+        print(f"📊 AI产业相关A股（行业+关键词）共 {len(ai_codes)} 只，开始拉取数据...")
+
+        rank = []
+        for ts_code in sorted(ai_codes):
+            try:
+                df = _fetch_a_share(pro, ts_code, START_DATE, END_DATE)
+                avg_amt = df["Amount"].mean()
+                if avg_amt > 100_000:  # 日均成交额 > 1亿
+                    rank.append((ts_code, avg_amt, df))
+            except Exception as e:
+                print(f"  ⚠️ {ts_code} 数据获取失败: {e}")
+                continue
+
+        rank.sort(key=lambda x: x[1], reverse=True)
+        print(f"按日均成交额筛选>1亿的AI产业A股有 {len(rank)} 只")
+        return rank
+
+    else:
+        # 港股: 恒生科技指数成分股 + hk_basic AI关键词筛选
+        hk_ai_codes = set()
+
+        # 1. 尝试获取恒生科技指数成分股
+        try:
+            idx_tech = pro.index_weight(index_code='HSTECH.HI',
+                                        start_date='20260601', end_date='20260615')
+            if idx_tech is not None and not idx_tech.empty:
+                codes = idx_tech['con_code'].unique().tolist()
+                hk_ai_codes.update(codes)
+                print(f"  恒生科技指数获取 {len(codes)} 只成分股")
+        except Exception as e:
+            print(f"  ⚠️ 恒生科技指数获取失败: {e}")
+
+        # 2. 通过 hk_basic 关键词筛选补充
+        try:
+            hk_all = pro.hk_basic()
+            if hk_all is not None and not hk_all.empty:
+                ai_keywords = ['科技', '软件', '半导体', '芯片', '机器人', '智能',
+                               'AI', '互联网', '数据', '云', '电子', '计算机',
+                               '通信', '光电', '汽车', '医药']  # 含智能驾驶/智能医疗
+                for _, row in hk_all.iterrows():
+                    name = str(row.get('name', ''))
+                    if any(kw in name for kw in ai_keywords):
+                        hk_ai_codes.add(row['ts_code'])
+        except Exception as e:
+            print(f"  ⚠️ 港股关键词筛选失败: {e}")
+
+        if not hk_ai_codes:
+            print("❌ 港股AI股票获取失败，使用预设列表")
+            hk_ai_codes = _get_fallback_ai_stocks_hk()
+
+        print(f"📊 AI产业相关港股共 {len(hk_ai_codes)} 只，开始拉取数据...")
+
+        rank = []
+        for ts_code in sorted(hk_ai_codes):
+            try:
+                df = _fetch_hk_share(pro, ts_code, START_DATE, END_DATE)
+                avg_amt = df["Amount"].mean()
+                if avg_amt > 100_000_000:  # 日均成交额 > 1亿 (HKD)
+                    rank.append((ts_code, avg_amt, df))
+            except Exception as e:
+                print(f"  ⚠️ {ts_code} 数据获取失败: {e}")
+                continue
+
+        rank.sort(key=lambda x: x[1], reverse=True)
+        print(f"按日均成交额筛选>1亿的AI产业港股有 {len(rank)} 只")
+        return rank
+
+
+def _get_fallback_ai_stocks_a() -> set:
+    """A股AI产业预设股票列表（作为API失败时的后备）"""
+    return {
+        # 人工智能/大模型
+        '000063.SZ', '002230.SZ', '002236.SZ', '300033.SZ', '300229.SZ',
+        '300418.SZ', '300624.SZ', '688111.SH', '688588.SH', '688981.SH',
+        # 芯片/半导体
+        '002049.SZ', '002156.SZ', '002185.SZ', '002371.SZ', '002409.SZ',
+        '300474.SZ', '300604.SZ', '300661.SZ', '603986.SH', '688012.SH',
+        '688256.SH', '688396.SH', '688981.SH',
+        # 机器人/自动化
+        '002008.SZ', '002527.SZ', '002747.SZ', '300024.SZ', '300124.SZ',
+        '300450.SZ', '688017.SH', '688160.SH',
+        # 云计算/大数据
+        '000034.SZ', '000977.SZ', '002065.SZ', '002335.SZ', '002410.SZ',
+        '300454.SZ', '600588.SH', '688158.SH',
+        # 智能驾驶
+        '002405.SZ', '002594.SZ', '002920.SZ', '300496.SZ', '600699.SH',
+        '601689.SH',
+        # 5G/物联网
+        '000063.SZ', '002281.SZ', '002396.SZ', '300308.SZ', '300502.SZ',
+        '300628.SZ',
+    }
+
+
+def _get_fallback_ai_stocks_hk() -> set:
+    """港股AI产业预设股票列表（作为API失败时的后备）"""
+    return {
+        '00700.HK',   # 腾讯控股
+        '09988.HK',   # 阿里巴巴
+        '09999.HK',   # 网易
+        '01810.HK',   # 小米集团
+        '09888.HK',   # 百度集团
+        '09618.HK',   # 京东集团
+        '09899.HK',   # 网易云音乐 → 云/音乐
+        '00020.HK',   # 商汤-W
+        '09626.HK',   # 哔哩哔哩-W
+        '01024.HK',   # 快手-W
+        '06618.HK',   # 京东健康
+        '02015.HK',   # 理想汽车-W
+        '09866.HK',   # 蔚来-SW
+        '09868.HK',   # 小鹏汽车-W
+        '00981.HK',   # 中芯国际
+        '01347.HK',   # 华虹半导体
+        '02382.HK',   # 舜宇光学科技
+        '02018.HK',   # 瑞声科技
+        '00669.HK',   # 创科实业/科技
+        '00992.HK',   # 联想集团
+        '01211.HK',   # 比亚迪股份
+        '02269.HK',   # 药明生物 → 科技医疗
+        '00005.HK',   # 汇丰 → 金融科技
+    }
 
 
 def get_best_ema_params(market: str, liquidity_up_to_1y: list, name_map) -> tuple[int, int]:
@@ -137,11 +303,12 @@ def  run_single_scan_backtest(df_row,config: BacktestConfig) -> tuple[dict, list
         else:
             if config.ema_fast==0 and config.ema_slow==0:
                 x_y_list = product(FAST_PERIODS, SLOW_PERIODS)
+                x_y_list = list(x_y_list) + [(0, 0)] #不要趋势过滤器
             else:
                 x_y_list = product([config.ema_fast], [config.ema_slow])
         results = []
         for x, y in x_y_list:
-            if y == x:
+            if y == x and (x, y) != (0, 0):
                 continue
             config.ema_fast = x
             config.ema_slow = y
@@ -157,15 +324,16 @@ def  run_single_scan_backtest(df_row,config: BacktestConfig) -> tuple[dict, list
                 channel_type=config.channel_type,
                 bb_period=config.bb_period,
                 bb_k=config.bb_k,
+                am_ma_period=config.am_ma_period,
             )
             print(f"=========={x}_{y}_{config.ts_code} 开始生成traders===========")
             trades, equity = run_backtest(df, config)
-            if len(trades)<21:
+            if len(trades)<6:
                 continue
             stats = calc_stats(trades, config.initial_capital, equity)
-            if (stats['胜率 (%)']<25 or stats['胜率 (%)']>38) or stats['期望收益率']<1:
+            if stats['胜率 (%)']<25 or stats['期望收益率']<1:
                 continue
-            if stats['回归年度回报率 (%)']<=2.5 or stats['R立方']<=0.8 or stats['稳健夏普比率']<=0.3:
+            if stats['回归年度回报率 (%)']<10 or stats['R立方']<=0.8 or stats['稳健夏普比率']<=0.3:
                 continue
             stats['ema_fast']=config.ema_fast
             stats['ema_slow']=config.ema_slow
@@ -226,9 +394,9 @@ def compute_ranking(results: list[dict],ts_code) -> pd.DataFrame:
     df["排名"] = range(1, len(df) + 1)
 
     # ————  保存 CSV ————
-    # OUTPUT_CSV = os.path.join(os.path.dirname(__file__), f"{ts_code}_xy_param_ranking.csv")
-    # df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
-    # print(f"\n✅ 排名结果已保存至 {OUTPUT_CSV}")
+    OUTPUT_CSV = os.path.join(os.path.dirname(__file__), f"{ts_code}_xy_param_ranking.csv")
+    df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+    print(f"\n✅ 排名结果已保存至 {OUTPUT_CSV}")
 
     return df
 
@@ -412,24 +580,28 @@ def main():
                                   f"{CHANNEL_TYPE}_{market}_{MODE}_result")
         os.makedirs(output_dir, exist_ok=True)
 
-        # ———— 1. 获取流动性 TOP10 ————
+        # ———— 1. 获取股票池 ————
         print(f"\n{'=' * 80}")
-        print(f"📊 筛选{label}近一年日均成交额 TOP10 ...")
+        if STOCK_SOURCE == "ai_industry":
+            print(f"📊 筛选{label}AI产业相关企业 ...")
+            stocks = get_ai_stocks(pro, market)
+        else:
+            print(f"📊 筛选{label}近一年日均成交额 TOP10 ...")
+            stocks = get_stocks(pro, market)
         print(f"{'=' * 80}")
-        liquidity_up_to_1y = get_stocks(pro, market)
 
         name_map = _get_name_map(pro, market)
-        for i, (ts_code, avg_amt, _) in enumerate(liquidity_up_to_1y, 1):
+        for i, (ts_code, avg_amt, _) in enumerate(stocks, 1):
             name = name_map.get(ts_code, "")
             print(f"  #{i} {ts_code} {name}  日均成交额: {avg_amt:>15,.0f} {currency}")
 
         if SCAN_ALL:
             # ———— 2. 扫描全市场最优参数 ————
             if CHANNEL_TYPE == "bollinger":
-                bb_period, bb_k = get_best_bb_params(pro, market, liquidity_up_to_1y)
+                bb_period, bb_k = get_best_bb_params(pro, market, stocks)
                 ema_fast, ema_slow = 0,0
             else:
-                ema_fast, ema_slow = get_best_ema_params(market, liquidity_up_to_1y, name_map)
+                ema_fast, ema_slow = get_best_ema_params(market, stocks, name_map)
                 bb_period, bb_k = 0,0
         else:
             bb_period, bb_k = 0, 0
@@ -437,7 +609,7 @@ def main():
 
         # ———— 3. 逐只回测 ————
         all_results = []
-        for i, (ts_code, avg_amt, df_row) in enumerate(liquidity_up_to_1y, 1):
+        for i, (ts_code, avg_amt, df_row) in enumerate(stocks, 1):
             name = name_map.get(ts_code, "")
             print(f"\n[{i}/10] {ts_code} {name} ...")
 
