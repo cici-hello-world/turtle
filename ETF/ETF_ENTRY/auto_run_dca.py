@@ -16,12 +16,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from ETF_ENTRY.rolling_dca_backtest import (
+from ETF.ETF_ENTRY.rolling_dca_backtest import (
     fetch_full_data,
     pick_widows,
 )
-from ETF_ENTRY.optimize_dca_day import pick_day
-from ETF_ENTRY.run_dca_backtest import run_result
+from ETF.ETF_ENTRY.optimize_dca_day import pick_day
+from ETF.ETF_ENTRY.run_dca_backtest import run_result
 
 # ============================================================
 # 配置

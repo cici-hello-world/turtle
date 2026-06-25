@@ -27,14 +27,13 @@ import sys
 import importlib
 import warnings
 import pandas as pd
-import numpy as np
 import tushare as ts
 from itertools import product
 
 warnings.filterwarnings("ignore")
 
 from core.config import BacktestConfig
-from core.data import fetch_data, _fetch_a_share, _fetch_hk_share
+from core.data import _fetch_a_share, _fetch_hk_share
 from core.indicators import compute_indicators
 from core.engine import run_backtest
 from core.statistics import calc_stats
@@ -63,6 +62,11 @@ SLOW_PERIODS = [50, 60, 80, 100, 150, 200, 250, 300, 350]
 BB_PERIODS = [10, 15, 20, 25, 30]
 BB_K_VALUES = [1.0, 1.5, 2.0, 2.5, 3.0]
 
+# 数据源切换: 环境变量 TURTLE_DATA_SOURCE=akshare
+_raw_ds = os.environ.get("TURTLE_DATA_SOURCE", "tushare")
+DATA_SOURCE = _raw_ds if _raw_ds in ("tushare", "akshare", "sina", "baostock") else "tushare"
+print(f"📡 数据源: {DATA_SOURCE}")
+
 # ============================================================
 # 工具函数
 # ============================================================
@@ -85,14 +89,14 @@ def load_ode_module(market: str):
     mod_name = "optimize_donchian_ema"
     if mod_name in sys.modules:
         importlib.reload(sys.modules[mod_name])
-    import optimize_donchian_ema as ode
+    from strategy.donchian import optimize_donchian_ema as ode
     return ode
 
 
-def get_stocks(pro, market: str) -> list[tuple[str, float, object]]:
+def get_stocks(pro, market: str, stock_source: str = "liquidity") -> list[tuple[str, float, object]]:
     """获取指定市场日均成交额>1亿的股票，返回 [(ts_code, avg_amt, df_raw), ...]"""
     ode = load_ode_module(market)
-    return ode.fetch_liquidity(pro, ode.START_DATE, ode.END_DATE)
+    return ode.fetch_liquidity(pro, ode.START_DATE, ode.END_DATE, stock_source, data_source=DATA_SOURCE)
 
 
 def get_ai_stocks(pro, market: str) -> list[tuple[str, float, object]]:
@@ -141,7 +145,7 @@ def get_ai_stocks(pro, market: str) -> list[tuple[str, float, object]]:
         rank = []
         for ts_code in sorted(ai_codes):
             try:
-                df = _fetch_a_share(pro, ts_code, START_DATE, END_DATE)
+                df = _fetch_a_share(pro, ts_code, START_DATE, END_DATE, data_source=DATA_SOURCE)
                 avg_amt = df["Amount"].mean()
                 if avg_amt > 100_000:  # 日均成交额 > 1亿
                     rank.append((ts_code, avg_amt, df))
@@ -191,7 +195,7 @@ def get_ai_stocks(pro, market: str) -> list[tuple[str, float, object]]:
         rank = []
         for ts_code in sorted(hk_ai_codes):
             try:
-                df = _fetch_hk_share(pro, ts_code, START_DATE, END_DATE)
+                df = _fetch_hk_share(pro, ts_code, START_DATE, END_DATE, data_source=DATA_SOURCE)
                 avg_amt = df["Amount"].mean()
                 if avg_amt > 100_000_000:  # 日均成交额 > 1亿 (HKD)
                     rank.append((ts_code, avg_amt, df))
@@ -280,7 +284,7 @@ def get_best_bb_params(pro, market: str, liquidity_up_to_1y: list) -> tuple[int,
     mod_name = "optimize_bollinger"
     if mod_name in sys.modules:
         importlib.reload(sys.modules[mod_name])
-    import optimize_bollinger as ob
+    from strategy.bollinger import optimize_bollinger as ob
 
     label = "A股" if market == "A" else "港股"
     print(f"\n📊 扫描{label}最优布林线参数 (bb_period, bb_k) ...")
@@ -325,16 +329,17 @@ def  run_single_scan_backtest(df_row,config: BacktestConfig) -> tuple[dict, list
                 bb_period=config.bb_period,
                 bb_k=config.bb_k,
                 am_ma_period=config.am_ma_period,
+                mode=config.mode,
             )
             print(f"=========={x}_{y}_{config.ts_code} 开始生成traders===========")
             trades, equity = run_backtest(df, config)
             if len(trades)<6:
                 continue
             stats = calc_stats(trades, config.initial_capital, equity)
-            if stats['胜率 (%)']<25 or stats['期望收益率']<1:
-                continue
-            if stats['回归年度回报率 (%)']<10 or stats['R立方']<=0.8 or stats['稳健夏普比率']<=0.3:
-                continue
+            # if stats['胜率 (%)']<25 or stats['期望收益率']<1:
+            #     continue
+            # if stats['回归年度回报率 (%)']<5 or stats['R立方']<=0.8 or stats['稳健夏普比率']<=0.3:
+            #     continue
             stats['ema_fast']=config.ema_fast
             stats['ema_slow']=config.ema_slow
             stats['bb_period']=config.bb_period
@@ -373,7 +378,11 @@ def _norm(series: pd.Series) -> pd.Series:
 
 
 def compute_ranking(results: list[dict],ts_code) -> pd.DataFrame:
-    """对回测结果计算综合评分并排名"""
+    """对回测结果计算综合评分并排名
+
+    注意：不 reset_index，保留原始 index 以便调用方通过 index
+    回查 results 列表中对应的 trades/df。
+    """
     df = pd.DataFrame(results)
 
     # 四项核心指标归一化
@@ -390,7 +399,7 @@ def compute_ranking(results: list[dict],ts_code) -> pd.DataFrame:
         df["score_稳健夏普比率"] * 0.25
     )
 
-    df = df.sort_values("综合得分", ascending=False).reset_index(drop=True)
+    df = df.sort_values("综合得分", ascending=False)
     df["排名"] = range(1, len(df) + 1)
 
     # ————  保存 CSV ————
@@ -420,8 +429,9 @@ def compute_cross_stock_ranking(all_stats: list[dict]) -> pd.DataFrame:
         df["score_稳健夏普比率"] * 0.25
     )
 
-    df = df.sort_values("综合得分", ascending=False).reset_index(drop=True)
+    df = df.sort_values("综合得分", ascending=False)
     df["排名"] = range(1, len(df) + 1)
+    df = df.reset_index(drop=True)
     return df
 
 
@@ -584,10 +594,9 @@ def main():
         print(f"\n{'=' * 80}")
         if STOCK_SOURCE == "ai_industry":
             print(f"📊 筛选{label}AI产业相关企业 ...")
-            stocks = get_ai_stocks(pro, market)
         else:
             print(f"📊 筛选{label}近一年日均成交额 TOP10 ...")
-            stocks = get_stocks(pro, market)
+        stocks = get_stocks(pro, market, STOCK_SOURCE)
         print(f"{'=' * 80}")
 
         name_map = _get_name_map(pro, market)

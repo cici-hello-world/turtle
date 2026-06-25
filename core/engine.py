@@ -1,13 +1,16 @@
 """海龟策略回测引擎
 
 支持多种模式:
-- "long":             不加仓做多
-- "long_more":        加仓做多（金字塔）
-- "short_more":       加仓做空（金字塔）
-- "both":             多空双向
-- "anti_martingale":  反马丁格尔（MA信号 + 跨交易仓位调整）
+- "long":                    不加仓做多
+- "long_more":               加仓做多（金字塔）
+- "short_more":              加仓做空（金字塔）
+- "both":                    多空双向
+- "anti_martingale":         反马丁格尔（MA信号 + 跨交易仓位调整）
+- "position_management_1":   仓位管理策略1（网格：参考价±N%触发买卖）
+- "position_management_2":   仓位管理策略2（Swing恢复：反弹卖出、回落买回，固定手数）
 """
 
+import math
 import numpy as np
 import pandas as pd
 
@@ -24,6 +27,10 @@ def run_backtest(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
         return _run_long_short(df, config)
     elif config.mode == "anti_martingale":
         return _run_anti_martingale(df, config)
+    elif config.mode == "position_management_1":
+        return _run_position_management_1(df, config)
+    elif config.mode == "position_management_2":
+        return _run_position_management_2(df, config)
     else:
         raise ValueError(f"未知的策略模式: {config.mode}")
 
@@ -45,6 +52,30 @@ def _ema_trend_ok(row, config, direction: str = "long") -> bool:
     else:
         return fast_val < slow_val
 
+def _dmi_trend_ok(row, config, direction: str = "long") -> bool:
+    """dmi 趋势过滤器。"""
+    plus_di = row.get("+DI", np.nan)
+    minus_di = row.get("-DI", np.nan)
+    adx = row.get("ADX14", np.nan)
+    adxr = row.get("ADXR", np.nan)
+    adx_up = row.get("ADX_UP", np.nan)
+    acua = row.get("ADX_CROSS_UP_ADXR", np.nan)
+    bonus = adx_up and acua
+    dmi_ok = (not pd.isna(adx) and not pd.isna(plus_di)
+              and not pd.isna(minus_di) and not pd.isna(adxr)) and adx > 30 #强趋势才能入场
+    if not config.user_dmi:
+        return True
+    if dmi_ok:
+        if direction == "long":
+            is_bull_trend = plus_di > minus_di #多头趋势
+        else:
+            is_bull_trend = plus_di < minus_di #空头趋势
+        trend_accelerating = bonus   # 趋势加速中
+    else:
+        is_bull_trend = False
+        trend_accelerating = False
+    return is_bull_trend and trend_accelerating
+
 
 def _calc_shares(capital: float, risk_per_trade: float, stop_dist: float,
                  per_shares: int) -> int:
@@ -55,6 +86,15 @@ def _calc_shares(capital: float, risk_per_trade: float, stop_dist: float,
 def _can_afford(cost: float, capital: float, ratio: float = 0.8) -> bool:
     """检查资金是否足够"""
     return cost <= capital * ratio
+
+
+def _collect_dividend(row, shares: int, ps: int, capital: float):
+    """除权日发放现金分红，返回 (dividend_income, new_capital)"""
+    div = row.get("Cash_Dividend", 0.0) or 0.0
+    if div > 0:
+        income = div * shares * ps
+        return income, capital + income
+    return 0.0, capital
 
 
 def _prep_entry(row, capital, config, per_shares):
@@ -231,6 +271,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
     stop_loss_price = 0.0
     stop_dist = 0.0
     current_shares = 0
+    cumulative_div = 0.0
     entry_date = None
 
     start_index = config.entry_period + 1
@@ -252,15 +293,20 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 entry_price = row["Close"]
                 stop_loss_price = entry_price - stop_dist
                 current_shares = shares
+                cumulative_div = 0.0
                 entry_date = current_date
                 capital -= cost
                 # _print_entry(label, row["Close"], shares * ps, cost, capital, stop_loss_price)
 
         else:
+            # 除权日发放现金分红
+            div_income, capital = _collect_dividend(row, current_shares, ps, capital)
+            cumulative_div += div_income
+
             exit_price, exit_reason = _check_long_exit(row, stop_loss_price, config)
             if exit_reason:
                 cost_basis = entry_price * current_shares * ps
-                pnl = (exit_price - entry_price) * current_shares * ps
+                pnl = (exit_price - entry_price) * current_shares * ps + cumulative_div
                 capital += exit_price * current_shares * ps
 
                 trades.append(_build_trade(
@@ -273,6 +319,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 # _print_exit(label, pnl, capital, exit_reason)
                 pos = None
                 current_shares = 0
+                cumulative_div = 0.0
                 entry_price = 0.0
                 stop_loss_price = 0.0
                 entry_date = None
@@ -282,7 +329,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
         last_price = df.iloc[-1]["Close"]
         last_date = df.iloc[-1]["Date"]
         cost_basis = entry_price * current_shares * ps
-        pnl = (last_price - entry_price) * current_shares * ps
+        pnl = (last_price - entry_price) * current_shares * ps + cumulative_div
         capital += last_price * current_shares * ps
 
         trades.append(_build_trade(
@@ -298,7 +345,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
 
 # ==================== 加仓做多（金字塔） ====================
 
-def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
+def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[list[dict], list[float]]:
     label = config.channel_type
     ps = config.per_shares
     # _print_header(label, config.initial_capital, config.risk_percent)
@@ -316,6 +363,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
     base_shares = 0
     max_shares = 0
     total_cost = 0.0
+    cumulative_div = 0.0
     entry_date = None
     more_info = []
 
@@ -333,8 +381,12 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
             skip_offset = 1 if config.skip_first_add else 0
             max_shares = shares * (config.max_pyramid - skip_offset)
 
-            if _long_entry_triggered(row, config) and _ema_trend_ok(row, config):
+            if (_long_entry_triggered(row, config)
+                    and _ema_trend_ok(row, config)
+                    and _dmi_trend_ok(row, config)):
                 cost = row["Close"] * shares * ps
+                trade_cost = _pm_trade_cost(cost,config.market,"buy")
+                cost += trade_cost
                 if not _can_afford(cost, capital):
                     continue
                 pos = "long"
@@ -343,11 +395,16 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
                 stop_loss_price = entry_price - stop_dist
                 current_shares = shares
                 total_cost = cost
+                cumulative_div = 0.0
                 entry_date = current_date
                 capital -= cost
                 # _print_entry(label, row["Close"], shares * ps, cost, capital, stop_loss_price)
 
         else:
+            # 除权日发放现金分红
+            div_income, capital = _collect_dividend(row, current_shares, ps, capital)
+            cumulative_div += div_income
+
             exit_price, exit_reason = _check_long_exit(row, stop_loss_price, config)
 
             # 加仓（仅在未触发出场信号时检查，以入场 ATR 为基准）
@@ -358,6 +415,8 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
                         add_price = row["Close"]
                         stop_loss_price = add_price - config.n_value * entry_atr
                         add_cost = add_price * base_shares * ps
+                        trade_cost = _pm_trade_cost(add_cost, config.market, "buy")
+                        add_cost+= trade_cost
                         if not _can_afford(add_cost, capital):
                             continue
                         current_shares += base_shares
@@ -375,7 +434,9 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
 
             if exit_reason:
                 sell_proceeds = exit_price * current_shares * ps
-                pnl = sell_proceeds - total_cost
+                trade_cost = _pm_trade_cost(sell_proceeds, config.market, "sell")
+                sell_proceeds-=trade_cost
+                pnl = sell_proceeds - total_cost + cumulative_div
                 capital += sell_proceeds
 
                 trades.append(_build_trade(
@@ -390,19 +451,23 @@ def _run_long_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[f
                 current_shares = 0
                 base_shares = 0
                 max_shares = 0
+                cumulative_div = 0.0
                 entry_price = 0.0
                 entry_atr = 0.0
                 stop_loss_price = 0.0
                 total_cost = 0.0
                 entry_date = None
                 more_info = []
+                if only_one:
+                    # 只交易一次
+                    return trades, equity_curve
 
     # 强制平仓
     if pos == "long":
         last_price = df.iloc[-1]["Close"]
         last_date = df.iloc[-1]["Date"]
         sell_proceeds = last_price * current_shares * ps
-        pnl = sell_proceeds - total_cost
+        pnl = sell_proceeds - total_cost + cumulative_div
         capital += sell_proceeds
 
         trades.append(_build_trade(
@@ -545,6 +610,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
     entry_price = 0.0
     stop_loss_price = 0.0
     current_shares = 0  # long 为正, short 为负
+    cumulative_div = 0.0
     entry_date = None
 
     start_index = config.entry_period + 1
@@ -567,6 +633,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 pos = "long"
                 stop_loss_price = entry_price - stop_dist
                 current_shares = shares
+                cumulative_div = 0.0
                 entry_date = current_date
                 capital -= cost
                 # _print_entry(label, entry_price, shares * PS, cost, capital, stop_loss_price)
@@ -576,14 +643,20 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 pos = "short"
                 stop_loss_price = entry_price + stop_dist
                 current_shares = -shares
+                cumulative_div = 0.0
                 entry_date = current_date
                 capital += income
                 # _print_short_entry(label, entry_price, shares * PS, income, capital, stop_loss_price)
 
         else:
+            # 仅多头收取现金分红（空头借股不享受分红）
+            if pos == "long":
+                div_income, capital = _collect_dividend(row, current_shares, PS, capital)
+                cumulative_div += div_income
+
             exit_price, exit_reason = _check_both_exit(row, pos, stop_loss_price, config)
             if exit_reason:
-                pnl = (exit_price - entry_price) * current_shares * PS
+                pnl = (exit_price - entry_price) * current_shares * PS + cumulative_div
                 capital += exit_price * current_shares * PS
 
                 if pos == "long":
@@ -600,6 +673,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 # _print_exit(label, pnl, capital, exit_reason)
                 pos = None
                 current_shares = 0
+                cumulative_div = 0.0
                 entry_price = 0.0
                 stop_loss_price = 0.0
                 entry_date = None
@@ -608,7 +682,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
     if pos is not None:
         last_price = df.iloc[-1]["Close"]
         last_date = df.iloc[-1]["Date"]
-        pnl = (last_price - entry_price) * current_shares * PS
+        pnl = (last_price - entry_price) * current_shares * PS + cumulative_div
         sell_proceeds = last_price * current_shares * PS
 
         if pos == "long":
@@ -651,6 +725,7 @@ def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[flo
     stop_loss_price = 0.0
     stop_dist = 0.0
     current_shares = 0
+    cumulative_div = 0.0
     entry_date = None
 
     start_index = max(config.am_ma_period, config.atr_period) + 1
@@ -681,10 +756,15 @@ def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[flo
                 entry_price = row["Close"]
                 stop_loss_price = entry_price - stop_dist
                 current_shares = shares
+                cumulative_div = 0.0
                 entry_date = current_date
                 capital -= cost
 
         else:
+            # 除权日发放现金分红
+            div_income, capital = _collect_dividend(row, current_shares, ps, capital)
+            cumulative_div += div_income
+
             exit_price = None
             exit_reason = ""
 
@@ -700,7 +780,7 @@ def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[flo
 
             if exit_reason:
                 cost_basis = entry_price * current_shares * ps
-                pnl = (exit_price - entry_price) * current_shares * ps
+                pnl = (exit_price - entry_price) * current_shares * ps + cumulative_div
                 capital += exit_price * current_shares * ps
 
                 trades.append(_build_trade(
@@ -722,6 +802,7 @@ def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[flo
 
                 pos = None
                 current_shares = 0
+                cumulative_div = 0.0
                 entry_price = 0.0
                 stop_loss_price = 0.0
                 entry_date = None
@@ -731,7 +812,7 @@ def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[flo
         last_price = df.iloc[-1]["Close"]
         last_date = df.iloc[-1]["Date"]
         cost_basis = entry_price * current_shares * ps
-        pnl = (last_price - entry_price) * current_shares * ps
+        pnl = (last_price - entry_price) * current_shares * ps + cumulative_div
         capital += last_price * current_shares * ps
 
         trades.append(_build_trade(
@@ -742,3 +823,417 @@ def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[flo
         ))
 
     return trades, equity_curve
+
+
+# ==================== 仓位管理策略1 (Position Management 1) ====================
+
+def _pm_trade_cost(amount: float, market: str, trade_type: str) -> float:
+    """计算仓位管理交易成本。
+    amount: 成交金额（价格 × 手数 × 每手股数）
+    market: "A" | "HK"
+    trade_type: "buy" | "sell"
+    """
+    if market == "HK":
+        # 港股：佣金0.01% + 印花税0.1% + 其他0.01% = 0.12%
+        return amount * 0.0012
+    else:  # A股
+        if trade_type == "buy":
+            # A股买入：佣金0.01% + 印花税0.05% = 0.06%
+            return amount * 0.0006
+        else:
+            # A股卖出：佣金0.01%
+            return amount * 0.0001
+
+
+def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
+    """仓位管理策略1 - 网格仓位管理：
+    - 从 pm_start_date 开始，持有 pm_initial_shares 手初始仓位
+    - 以起始日收盘价为参考价
+    - 相对参考价上涨 pm_grid_up → 减仓 pm_reduce_pct（权益%）
+    - 相对参考价下跌 pm_grid_down → 加仓 pm_add_pct（权益%）
+    - 每次交易后参考价重置为成交价，形成动态网格
+    - 仓位上限 pm_max_position_pct，现金下限 pm_min_cash_pct 防止过度加仓
+    """
+    ps = config.per_shares
+    initial_lots = config.pm_initial_shares
+    reduce_pct = config.pm_reduce_pct
+    add_pct = config.pm_add_pct
+    grid_up = config.pm_grid_up
+    grid_down = config.pm_grid_down
+    max_pos_pct = config.pm_max_position_pct
+    min_cash_pct = config.pm_min_cash_pct
+
+    pm_trades = []
+    capital = config.initial_capital
+    current_lots = initial_lots
+    reference_price = 0.0
+
+    # 定位起始日期
+    start_date_str = config.pm_start_date
+    if not start_date_str:
+        print("⚠️ [仓位管理] 未设置 pm_start_date，跳过")
+        return pm_trades, [config.initial_capital]
+
+    start_date = pd.to_datetime(start_date_str)
+    df_dates = pd.to_datetime(df["Date"])
+    mask = df_dates >= start_date
+    if not mask.any():
+        print(f"⚠️ [仓位管理] 数据中没有 >= {start_date_str} 的日期，跳过")
+        return pm_trades, [config.initial_capital]
+    start_index = int(np.argmax(mask.values))
+
+    # 初始化参考价为起始日收盘价
+    start_row = df.iloc[start_index]
+    reference_price = float(start_row["Close"])
+
+    # 初始权益
+    initial_equity = capital + current_lots * reference_price * ps
+    equity_curve = [initial_equity]
+    donchian_exit_date = None
+    for i in range(start_index + 1, len(df)):
+        row = df.iloc[i]
+        close = float(row["Close"])
+        current_date = row["Date"]
+        if donchian_exit_date:
+            if donchian_exit_date >= current_date:
+                continue
+        equity_before = capital + current_lots * close * ps
+        hh_entry = row.get("HH_Entry", np.nan)
+        # DMI + 趋势自适应（含 ADXR 趋势强度确认）
+        if config.pm_adaptive and close > hh_entry and _dmi_trend_ok(row, config):
+            # ---- 单边上涨趋势 → Donchian 通道：趋势跟踪，不轻易卖 ----
+            # Donchian 买入：突破20日高点 + 趋势加速确认 → 加仓
+            df_donchian = df.iloc[(i-(config.entry_period+1)):]
+            config.initial_capital = capital
+            trades,eq =_run_long_with_pyramid(df_donchian, config)
+            if trades:
+                add_lots = trades[0].get("Shares",0)
+                total_cost = trades[0].get("Cost_¥",0)
+                capital -= total_cost
+                current_lots += add_lots
+                equity = capital + current_lots * close * ps
+                reference_price = close
+                pm_trades.append({
+                    "Date": current_date,
+                    "Entry Date": current_date,
+                    "Exit Date": current_date,
+                    "Type": "加仓",
+                    "Price": close,
+                    "Shares": add_lots,
+                    "Entry Price": close,
+                    "Exit Price": close,
+                    "Cost_¥": 0,
+                    "PnL_¥": 0,
+                    "PnL_%": 0.0,
+                    "Capital_After": capital,
+                    "Reason": f"Donchian买入(突破{int(hh_entry)}，趋势延续)",
+                    "Amount": -total_cost,
+                    "Position_After": current_lots,
+                    "Equity_After": equity,
+                    "Reference_Price": reference_price,
+                })
+                equity_curve.append(equity)
+                donchian_exit_date = trades[0].get("Exit Date")
+                exit_price = trades[0].get("Exit Price")
+                trade_amount = trades[0].get("Capital_After") - capital
+                capital = trades[0].get("Capital_After")
+                reason = trades[0].get("Reason")
+                current_lots -= add_lots
+                equity = capital + current_lots * exit_price * ps
+                reference_price = exit_price
+                pm_trades.append({
+                    "Date": donchian_exit_date,
+                    "Entry Date": donchian_exit_date,
+                    "Exit Date": donchian_exit_date,
+                    "Type": "减仓",
+                    "Price": exit_price,
+                    "Shares": add_lots,
+                    "Entry Price": exit_price,
+                    "Exit Price": exit_price,
+                    "Cost_¥": 0,
+                    "PnL_¥": 0,
+                    "PnL_%": 0.0,
+                    "Capital_After": capital,
+                    "Reason": reason,
+                    "Amount": trade_amount,
+                    "Position_After": current_lots,
+                    "Equity_After": equity,
+                    "Reference_Price": reference_price,
+                })
+                equity_curve.append(equity)
+                if current_lots>0:
+                    #同时清仓剩余仓位
+                    reduce_lots = current_lots
+                    gross_proceeds = exit_price * reduce_lots * ps
+                    trade_cost = _pm_trade_cost(gross_proceeds, config.market, "sell")
+                    net_proceeds = gross_proceeds - trade_cost
+                    capital += net_proceeds
+                    current_lots=0
+                    reference_price = exit_price
+                    equity = capital
+                    pm_trades.append({
+                        "Date": donchian_exit_date,
+                        "Entry Date": donchian_exit_date,
+                        "Exit Date": donchian_exit_date,
+                        "Type": "减仓",
+                        "Price": exit_price,
+                        "Shares": reduce_lots,
+                        "Entry Price": exit_price,
+                        "Exit Price": exit_price,
+                        "Cost_¥": 0,
+                        "PnL_¥": 0,
+                        "PnL_%": 0.0,
+                        "Capital_After": capital,
+                        "Reason": reason,
+                        "Amount": net_proceeds,
+                        "Position_After": current_lots,
+                        "Equity_After": equity,
+                        "Reference_Price": reference_price,
+                    })
+                    equity_curve.append(equity)
+            # 非单边上涨时网格交易买入
+        elif close <= reference_price * (1 - grid_down):
+            add_value = equity_before * add_pct
+            add_lots = math.ceil(add_value / (close * ps))
+            if add_lots <= 0:
+                continue
+            if current_lots == 0 and equity_before > initial_equity * 1.3:
+                # 当前已回本停止交易
+                continue
+            # 仓位上限
+            position_value_after = (current_lots + add_lots) * close * ps
+            if position_value_after > equity_before * max_pos_pct:
+                add_lots = int((equity_before * max_pos_pct) / (close * ps)) - current_lots
+                if add_lots <= 0:
+                    continue
+
+            # 现金下限
+            gross_cost = close * add_lots * ps
+            trade_cost = _pm_trade_cost(gross_cost, config.market, "buy")
+            total_cost = gross_cost + trade_cost
+            cash_after = capital - total_cost
+            if cash_after < equity_before * min_cash_pct:
+                max_cost = capital - equity_before * min_cash_pct
+                afford_per_lot = close * ps * (1 + (0.0012 if config.market == "HK" else 0.0006))
+                add_lots = int(max_cost / afford_per_lot) if afford_per_lot > 0 else 0
+            if add_lots <= 0:
+                continue
+            gross_cost = close * add_lots * ps
+            trade_cost = _pm_trade_cost(gross_cost, config.market, "buy")
+            total_cost = gross_cost + trade_cost
+
+            capital -= total_cost
+            current_lots += add_lots
+            reference_price = close
+
+            equity = capital + current_lots * close * ps
+            pm_trades.append({
+                "Date": current_date,
+                "Entry Date": current_date,
+                "Exit Date": current_date,
+                "Type": "加仓",
+                "Price": close,
+                "Entry Price": close,
+                "Exit Price": close,
+                "Shares": add_lots,
+                "Cost_¥": trade_cost,
+                "PnL_¥": -total_cost,
+                "PnL_%": 0.0,
+                "Capital_After": capital,
+                "Reason": f"网格买入 -{int(grid_down * 100)}%（权益{int(add_pct * 100)}%）",
+                "Amount": -total_cost,
+                "Position_After": current_lots,
+                "Equity_After": equity,
+                "Reference_Price": reference_price,
+            })
+            equity_curve.append(equity)
+        else:
+            # ---- 非单边上涨趋势 → 网格交易 ----
+            # 网格卖出（非自适应DMI模式：需空头强势才卖）
+            if (close >= reference_price * (1 + grid_up)
+                    and current_lots > 0):
+                reduce_value = equity_before * reduce_pct
+                reduce_lots = math.ceil(reduce_value / (close * ps))
+                reduce_lots = min(reduce_lots, current_lots)
+                if  equity_before > initial_equity*1.3:
+                    # 当前已回本则全部清仓
+                    reduce_lots=current_lots
+                if reduce_lots > 0:
+                    gross_proceeds = close * reduce_lots * ps
+                    trade_cost = _pm_trade_cost(gross_proceeds, config.market, "sell")
+                    net_proceeds = gross_proceeds - trade_cost
+                    capital += net_proceeds
+                    current_lots -= reduce_lots
+                    reference_price = close
+
+                    equity = capital + current_lots * close * ps
+                    pm_trades.append({
+                        "Date": current_date, "Entry Date": current_date,
+                        "Exit Date": current_date, "Type": "减仓",
+                        "Price": close, "Entry Price": close, "Exit Price": close,
+                        "Shares": reduce_lots, "Cost_¥": trade_cost,
+                        "PnL_¥": net_proceeds, "PnL_%": 0.0,
+                        "Capital_After": capital,
+                        "Reason": f"网格卖出 +{int(grid_up*100)}%（权益{int(reduce_pct*100)}%）",
+                        "Amount": net_proceeds, "Position_After": current_lots,
+                        "Equity_After": equity, "Reference_Price": reference_price,
+                    })
+                    equity_curve.append(equity)
+    # 追加最终权益点
+    last_close = float(df.iloc[-1]["Close"])
+    final_equity = capital + current_lots * last_close * ps
+    equity_curve.append(final_equity)
+
+    return pm_trades, equity_curve
+
+
+# ==================== 仓位管理策略2 (Position Management 2) ====================
+
+def _run_position_management_2(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
+    """仓位管理策略2 - Swing 恢复仓位管理：
+    - 从 pm_start_date 开始，持有 pm_initial_shares 手初始仓位
+    - 状态机：holding ↔ waiting_buyback
+    - holding 状态：跟踪近期低点，相对低点反弹 pm2_bounce_up → 卖出 pm2_trade_lots 手
+    - waiting_buyback 状态：跟踪卖出价，相对卖出价回落 pm2_buyback_down → 买回 pm2_trade_lots 手
+    - 卖出和买回的振幅不对等（bounce_up > buyback_down 才有差价利润）
+    - 每次固定手数交易，靠反复 swing 赚取差价摊薄持仓成本
+    - 仓位上限 pm_max_position_pct，现金下限 pm_min_cash_pct
+    """
+    ps = config.per_shares
+    initial_lots = config.pm_initial_shares
+    bounce_up = config.pm2_bounce_up
+    buyback_down = config.pm2_buyback_down
+    trade_lots = config.pm2_trade_lots
+    max_pos_pct = config.pm_max_position_pct
+    min_cash_pct = config.pm_min_cash_pct
+
+    pm_trades = []
+    capital = config.initial_capital
+    current_lots = initial_lots
+
+    # 定位起始日期
+    start_date_str = config.pm_start_date
+    if not start_date_str:
+        print("⚠️ [仓位管理2] 未设置 pm_start_date，跳过")
+        return pm_trades, [config.initial_capital]
+
+    start_date = pd.to_datetime(start_date_str)
+    df_dates = pd.to_datetime(df["Date"])
+    mask = df_dates >= start_date
+    if not mask.any():
+        print(f"⚠️ [仓位管理2] 数据中没有 >= {start_date_str} 的日期，跳过")
+        return pm_trades, [config.initial_capital]
+    start_index = int(np.argmax(mask.values))
+
+    # 初始化：近期低点 = 起始日收盘价，状态 = holding
+    start_row = df.iloc[start_index]
+    recent_low = float(start_row["Close"])
+    last_sell_price = 0.0
+    state = "holding"
+
+    # 初始权益
+    initial_equity = capital + current_lots * recent_low * ps
+    equity_curve = [initial_equity]
+
+    for i in range(start_index + 1, len(df)):
+        row = df.iloc[i]
+        close = float(row["Close"])
+        current_date = row["Date"]
+        equity_before = capital + current_lots * close * ps
+
+        # 无论什么状态，都更新近期低点（用于后续卖出参考）
+        if close < recent_low:
+            recent_low = close
+
+        if state == "holding":
+            # ---- 反弹触发卖出 ----
+            bounce_trigger = recent_low * (1 + bounce_up)
+            if close >= bounce_trigger and current_lots >= trade_lots:
+                sell_lots = min(trade_lots, current_lots)
+                if sell_lots <= 0:
+                    continue
+
+                gross = close * sell_lots * ps
+                trade_cost = _pm_trade_cost(gross, config.market, "sell")
+                net = gross - trade_cost
+                capital += net
+                current_lots -= sell_lots
+
+                equity = capital + current_lots * close * ps
+                pm_trades.append({
+                    "Date": current_date, "Entry Date": current_date,
+                    "Exit Date": current_date, "Type": "减仓",
+                    "Price": close, "Entry Price": close, "Exit Price": close,
+                    "Shares": sell_lots, "Cost_¥": trade_cost,
+                    "PnL_¥": net, "PnL_%": 0.0,
+                    "Capital_After": capital,
+                    "Reason": f"Swing卖出(反弹+{int(bounce_up*100)}%)",
+                    "Amount": net, "Position_After": current_lots,
+                    "Equity_After": equity, "Reference_Price": close,
+                })
+                equity_curve.append(equity)
+
+                last_sell_price = close
+                recent_low = close      # 重置低点为卖出价
+                state = "waiting_buyback"
+
+        elif state == "waiting_buyback":
+            # ---- 回落触发买回 ----
+            buyback_trigger = last_sell_price * (1 - buyback_down)
+            if close <= buyback_trigger:
+                buy_lots = trade_lots
+
+                # 仓位上限检查
+                position_value_after = (current_lots + buy_lots) * close * ps
+                if position_value_after > equity_before * max_pos_pct:
+                    buy_lots = int((equity_before * max_pos_pct) / (close * ps)) - current_lots
+                    if buy_lots <= 0:
+                        # 仓位已满，放弃买回，回到 holding
+                        state = "holding"
+                        continue
+
+                # 现金下限检查
+                gross_cost = close * buy_lots * ps
+                trade_cost = _pm_trade_cost(gross_cost, config.market, "buy")
+                total_cost = gross_cost + trade_cost
+                cash_after = capital - total_cost
+                if cash_after < equity_before * min_cash_pct:
+                    max_cost = capital - equity_before * min_cash_pct
+                    fee_rate = 0.0012 if config.market == "HK" else 0.0006
+                    afford_per_lot = close * ps * (1 + fee_rate)
+                    buy_lots = int(max_cost / afford_per_lot) if afford_per_lot > 0 else 0
+                if buy_lots <= 0:
+                    # 现金不足，放弃买回，回到 holding
+                    state = "holding"
+                    continue
+
+                gross_cost = close * buy_lots * ps
+                trade_cost = _pm_trade_cost(gross_cost, config.market, "buy")
+                total_cost = gross_cost + trade_cost
+
+                capital -= total_cost
+                current_lots += buy_lots
+
+                equity = capital + current_lots * close * ps
+                pm_trades.append({
+                    "Date": current_date, "Entry Date": current_date,
+                    "Exit Date": current_date, "Type": "加仓",
+                    "Price": close, "Entry Price": close, "Exit Price": close,
+                    "Shares": buy_lots, "Cost_¥": trade_cost,
+                    "PnL_¥": -total_cost, "PnL_%": 0.0,
+                    "Capital_After": capital,
+                    "Reason": f"Swing买回(回落{int(buyback_down*100)}%)",
+                    "Amount": -total_cost, "Position_After": current_lots,
+                    "Equity_After": equity, "Reference_Price": close,
+                })
+                equity_curve.append(equity)
+
+                recent_low = close
+                state = "holding"
+
+    # 追加最终权益点
+    last_close = float(df.iloc[-1]["Close"])
+    final_equity = capital + current_lots * last_close * ps
+    equity_curve.append(final_equity)
+
+    return pm_trades, equity_curve

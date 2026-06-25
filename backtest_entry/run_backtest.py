@@ -32,6 +32,7 @@ def run(config: BacktestConfig):
             start_date=config.start_date,
             end_date=config.end_date,
             exchange=config.exchange,
+            data_source=config.data_source,
         )
 
         # 2. 计算指标
@@ -46,6 +47,7 @@ def run(config: BacktestConfig):
             bb_period=config.bb_period,
             bb_k=config.bb_k,
             am_ma_period=config.am_ma_period,
+            mode = config.mode
         )
 
         # 3. 运行回测
@@ -92,7 +94,7 @@ if __name__ == "__main__":
     #     max_pyramid=5,
     #     ema_fast=0,
     #     ema_slow=0,
-    #     skip_first_add = True
+    #     data_source="akshare",
     # )
     # config = BacktestConfig(
     #     ts_code="09992.HK",
@@ -106,6 +108,17 @@ if __name__ == "__main__":
     #     ema_slow=80,
     #     am_ma_period =50
     # )
+    # config = BacktestConfig(
+    #         ts_code="02513.HK",
+    #         stock_name="智谱",
+    #         market="HK",
+    #         mode="long_more",
+    #         initial_capital =4000000,
+    #         years=1,
+    #         atr_period=20,
+    #         ema_fast=0,
+    #         ema_slow=0,
+    #     )
     # config = BacktestConfig(
     #     ts_code="300274.SZ",
     #     stock_name="阳光电源",
@@ -167,13 +180,20 @@ if __name__ == "__main__":
     #     ema_fast=20,
     #     ema_slow=50,
     # )
-    config = BacktestConfig(
-        ts_code="603986.SH",
-        stock_name="兆易创新",
-        ema_fast=0,
-        ema_slow=0,
-        initial_capital=400000,
-    )
+    # config = BacktestConfig(
+    #     ts_code="603986.SH",
+    #     stock_name="兆易创新",
+    #     ema_fast=0,
+    #     ema_slow=0,
+    #     initial_capital=400000,
+    # )
+    # config = BacktestConfig(
+    #     ts_code="688256.SH",
+    #     stock_name="寒武纪",
+    #     initial_capital=400000,
+    #     ema_fast=50,
+    #     ema_slow=300,
+    # )
     # config = BacktestConfig(
     #     ts_code="002475.SZ",
     #     stock_name="立讯精密",
@@ -188,6 +208,25 @@ if __name__ == "__main__":
     #     max_pyramid=5,
     #     ema_slow=100,
     #     ema_fast=50,
+    # )
+    # config = BacktestConfig(
+    #     ts_code="688530.SH",
+    #     stock_name="欧莱新材",
+    #     market="A",
+    #     mode="long_more",
+    #     max_pyramid=5,
+    #     ema_slow=0,
+    #     ema_fast=0,
+    # )
+    # config = BacktestConfig(
+    #     ts_code="301396.SZ",
+    #     stock_name="宏景科技",
+    #     market="A",
+    #     mode="long_more",
+    #     max_pyramid=5,
+    #     ema_slow=20,
+    #     ema_fast=300,
+    #     initial_capital=200000,
     # )
     # config = BacktestConfig(
     #     ts_code="00388.HK",
@@ -221,13 +260,107 @@ if __name__ == "__main__":
     # )
 
     # config = BacktestConfig(
+    #     ts_code="09992.HK",
+    #     stock_name="泡泡玛特",  # 20201211开市
+    #     market="HK",
+    #     mode="position_management_1",
+    #     per_shares=200,
+    #     pm_start_date="20251001",
+    #     start_date="20201211",
+    #     user_dmi=True,
+    #     ema_fast=0,
+    #     ema_slow=0,
+    #     pm_grid_up=0.1,
+    #     pm_grid_down=0.1,
+    #     pm_add_pct=0.030,
+    #     pm_reduce_pct=0.75,
+    #     pm_initial_shares=2,   # 手数（26手 = 2600股）
+    #     initial_capital=40000,
+    #     data_source="akshare",
+    # )
+    # config = BacktestConfig(
+    #     ts_code="02015.HK",
+    #     stock_name="理想",  # 2018-09-20开市
+    #     market="HK",
+    #     mode="position_management_1",
+    #     user_dmi=True,
+    #     ema_fast=0,
+    #     ema_slow=0,
+    #     pm_start_date="20251001",
+    #     start_date="20210812",
+    #     pm_grid_up=0.02,
+    #     pm_grid_down=0.10,
+    #     pm_add_pct=0.150,
+    #     pm_reduce_pct=1.00,
+    #     pm_initial_shares=25,  # 手数（26手 = 2600股）
+    #     initial_capital=40000,
+    #     data_source="akshare",
+    #  )
+    # config = BacktestConfig(
+    #     ts_code="03690.HK",
+    #     stock_name="美团",  # 2018-09-20开市
+    #     market="HK",
+    #     mode="position_management_1",
+    #     pm_start_date="20251001",
+    #     start_date="20180920",
+    #     user_dmi=True,
+    #     ema_fast=0,
+    #     ema_slow=0,
+    #     pm_grid_up=0.05,
+    #     pm_grid_down = 0.07,
+    #     pm_add_pct = 0.15,
+    #     pm_reduce_pct = 0.75,
+    #     pm_initial_shares=2,  # 手数（26手 = 2600股）
+    #     initial_capital=40000,
+    #     data_source="akshare",
+    # )
+    config = BacktestConfig(
+        ts_code="01810.HK",
+        stock_name="小米",
+        market="HK",
+        mode="position_management_1",
+        pm_start_date="20251001",
+        start_date="20180709",
+        pm_grid_up=0.02,
+        pm_grid_down = 0.05,
+        pm_add_pct = 0.03,
+        pm_reduce_pct = 0.75,
+        user_dmi=True,
+        ema_fast=0,
+        ema_slow=0,
+        pm_initial_shares=8,  # 手数（26手 = 2600股）
+        initial_capital=40000,
+        data_source="akshare",
+    )
+    # config = BacktestConfig(
+    #     ts_code="06181.HK",
+    #     stock_name="老铺",
+    #     market="HK",
+    #     mode="position_management_1",
+    #     start_date="20240628",
+    #     pm_start_date="20251001",
+    #     user_dmi= True,
+    #     pm_grid_up    = 0.05,
+    #     pm_grid_down  = 0.07,
+    #     pm_add_pct    = 0.030,
+    #     pm_reduce_pct = 0.50,
+    #     ema_slow = 0,
+    #     ema_fast = 0,
+    #     pm_initial_shares=3,  # 手数（26手 = 2600股）
+    #     initial_capital=40000,
+    #     data_source="akshare",
+    # )
+    # config = BacktestConfig(
     #     ts_code="06181.HK",
     #     stock_name="老铺",  # 2018-09-20开市
     #     market="HK",
     #     mode="long_more",
     #     ema_fast=0,
     #     ema_slow=0,
-    #     initial_capital=400000,
+    #     user_dmi=False,
+    #     start_date="20240628",
+    #     end_date="20260624",
+    #     initial_capital=200000,
     # )
     # config = BacktestConfig(
     #     ts_code="09992.HK",

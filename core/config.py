@@ -1,7 +1,12 @@
 """海龟策略回测配置"""
 
+import os
 from dataclasses import dataclass, field
 import pandas as pd
+
+# 项目根目录 & 输出根目录
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_RESULT_ROOT = os.path.join(_PROJECT_ROOT, "result")
 
 
 @dataclass
@@ -19,6 +24,7 @@ class BacktestConfig:
     end_date: str = ""  # 留空自动计算
     exchange: str = ""  # 留空按 market 自动推导
     per_shares: int = 100  # 每手股数
+    data_source: str = "tushare"  # "tushare" | "akshare" | "sina" | "baostock"
 
     # ========== 策略参数 ==========
     entry_period: int = 20
@@ -27,6 +33,9 @@ class BacktestConfig:
     n_value: float = 2.0  # 止损 ATR 倍数
     risk_percent: float = 1.0  # 单笔风险 %
     initial_capital: float = 200000.0
+
+    # ========== DMI 趋势过滤器 ==========
+    user_dmi: bool = False  # 默认不启用
 
     # ========== EMA 趋势过滤器 ==========
     ema_fast: int = 40   # 快线周期，0 表示禁用
@@ -39,7 +48,7 @@ class BacktestConfig:
     bb_k: float = 2.0               # 布林线标准差倍数（仅 bollinger）
 
     # ========== 策略模式 ==========
-    mode: str = "long_more"  # "long" | "long_more" | "short_more" | "both" | "anti_martingale"
+    mode: str = "long_more"  # "long" | "long_more" | "short_more" | "both" | "anti_martingale" | "position_management_1" | "position_management_2"
     max_pyramid: int = 5  # 最大加仓次数（仅 long_more）
     skip_first_add: bool = False  # 跳过首次加仓，总加仓次数-1（仅 long_more）
 
@@ -47,6 +56,25 @@ class BacktestConfig:
     am_ma_period: int = 50               # MA 均线周期，用于入场/出场信号
     am_risk_multiplier: float = 1.5      # 盈利后风险乘数
     am_max_multiplier: float = 4.0       # 最大风险乘数上限
+
+    # ========== Position Management 1 参数（网格仓位管理） ==========
+    pm_start_date: str = ""          # 仓位管理起始日期，格式 "YYYYMMDD"
+    pm_initial_shares: int = 0       # 初始持仓手数
+    pm_reduce_pct: float = 0.25      # 卖出权益的百分比
+    pm_add_pct: float = 0.15         # 买入权益的百分比
+    pm_grid_up: float = 0.05         # 相对参考价上涨X%触发卖出
+    pm_grid_down: float = 0.05       # 相对参考价下跌X%触发买入
+    pm_max_position_pct: float = 0.9  # 仓位上限（持仓市值/权益）
+    pm_min_cash_pct: float = 0.10      # 现金下限（现金/权益）
+    pm_use_dmi: bool = False          # 是否启用 DMI 过滤器
+    pm_adaptive: bool = True         # 趋势自适应：上涨趋势放宽卖出、下跌趋势收紧
+
+    # ========== Position Management 2 参数（Swing 恢复仓位管理） ==========
+    # 与 PM1 不同：PM2 做非对称 swing —— 反弹卖出、回落买回，靠波动差价摊薄成本
+    # 卖出和买回的振幅不对等，交易量是固定手数而非权益%
+    pm2_bounce_up: float = 0.10      # 从近期低点反弹X%触发卖出
+    pm2_buyback_down: float = 0.08   # 从卖出价回落X%触发买回（必须< bounce_up 才有利润）
+    pm2_trade_lots: int = 1          # 每次交易固定手数
 
     # ========== 输出 ==========
     output_dir: str = ""  # 留空自动推导
@@ -58,7 +86,7 @@ class BacktestConfig:
         if not self.start_date:
             self.start_date = (today - pd.DateOffset(years=self.years)).strftime("%Y%m%d")
         if not self.end_date:
-            self.end_date = today.strftime("%Y%m%d")
+            self.end_date = (today- pd.DateOffset(days=1)).strftime("%Y%m%d")
 
         # 自动推导交易所代码
         if not self.exchange:
@@ -77,6 +105,7 @@ class BacktestConfig:
                     "short_more": "a_stock_shot_more_result",
                     "both": "a_stock_both_result",
                     "anti_martingale": "a_stock_anti_martingale_result",
+                    "position_management_1": "position_management_result",
                 }
             elif self.market == "ETF":
                 suffix_map = {
@@ -85,6 +114,7 @@ class BacktestConfig:
                     "short_more": "ETF_shot_more_result",
                     "both": "ETF_both_result",
                     "anti_martingale": "ETF_anti_martingale_result",
+                    "position_management_1": "position_management_result",
                 }
             else:
                 suffix_map = {
@@ -93,8 +123,10 @@ class BacktestConfig:
                     "short_more": "hk_stock_shot_more_result",
                     "both": "hk_stock_both_result",
                     "anti_martingale": "hk_stock_anti_martingale_result",
+                    "position_management_1": "position_management_result",
                 }
-            self.output_dir = suffix_map.get(self.mode, f"{self.market.lower()}_stock_backtest")
+            sub_dir = suffix_map.get(self.mode, f"{self.market.lower()}_stock_backtest")
+            self.output_dir = os.path.join(_RESULT_ROOT, sub_dir)
 
     @property
     def risk_per_trade(self) -> float:

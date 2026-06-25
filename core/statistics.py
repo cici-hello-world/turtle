@@ -9,9 +9,19 @@ from keyring.backends import null
 
 def _build_equity_dates(trades: list[dict], equity_curve: list[float]) -> pd.Series | None:
     """为资金曲线每个点构造对应日期，失败返回 None"""
-    if not trades or "Entry Date" not in trades[0] or "Exit Date" not in trades[0]:
+    if not trades or ("Entry Date" not in trades[0] and "Date" not in trades[0]):
         return None
     try:
+        # 仓位管理策略使用 "Date" 字段
+        if "Date" in trades[0]:
+            dates = [pd.to_datetime(trades[0]["Date"])]
+            for t in trades:
+                dates.append(pd.to_datetime(t["Date"]))
+            # 对齐 equity_curve：如果末尾多一个最终权益点，补最后一个日期
+            while len(dates) < len(equity_curve):
+                dates.append(dates[-1])
+            return pd.Series(dates)
+
         first_entry = pd.to_datetime(trades[0]["Entry Date"])
         dates = [first_entry]  # equity_curve[0] 对应起始日
         for t in trades:
@@ -202,25 +212,48 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
         return empty_result
 
     df_trades = pd.DataFrame(trades)
-    last_entry_date = df_trades["Entry Date"].iloc[-1]
-    last_exit_date = df_trades["Exit Date"].iloc[-1]
-    # 排除强制平仓
-    df_trades = df_trades[df_trades["Reason"] != "强制平仓"]
+
+    # 仓位管理策略：使用 "Date" 字段，用法不同
+    is_pm = "Position_After" in df_trades.columns
+    if is_pm:
+        last_entry_date = df_trades["Date"].iloc[-1]
+        last_exit_date = df_trades["Date"].iloc[-1]
+        # 排除强制平仓
+        df_trades_no_fc = df_trades[df_trades["Reason"] != "强制平仓"]
+        # 最终资金用 equity_curve 的最后一个值
+        final_capital = equity_curve[-1] if equity_curve else initial_capital
+    else:
+        last_entry_date = df_trades["Entry Date"].iloc[-1]
+        last_exit_date = df_trades["Exit Date"].iloc[-1]
+        # 排除强制平仓
+        df_trades_no_fc = df_trades[df_trades["Reason"] != "强制平仓"]
+        if len(df_trades_no_fc) == 0:
+            final_capital = equity_curve[-1] if equity_curve else initial_capital
+        else:
+            final_capital = df_trades_no_fc.iloc[-1]["Capital_After"]
+    df_trades = df_trades_no_fc
 
     if len(df_trades) == 0:
-        return empty_result
+        pm_init = equity_curve[0] if (is_pm and equity_curve) else initial_capital
+        result = empty_result.copy()
+        result["最终资金 (¥)"] = round(final_capital, 2)
+        result["总盈亏 (¥)"] = round(final_capital - pm_init, 2)
+        result["总收益率 (%)"] = round((final_capital - pm_init) / pm_init * 100, 2) if pm_init > 0 else 0
+        result["last_entry_date"] = last_entry_date
+        result["last_exit_date"] = last_exit_date
+        return result
 
     wins = df_trades[df_trades["PnL_%"] > 0]
     losses = df_trades[df_trades["PnL_%"] < 0]
-
-    final_capital = df_trades.iloc[-1]["Capital_After"]
     total_trades = len(df_trades)
     win_count = len(wins)
     loss_count = len(losses)
     win_rate = (win_count / total_trades * 100) if total_trades > 0 else 0
 
-    total_pnl = final_capital - initial_capital
-    total_return = (total_pnl / initial_capital) * 100
+    # 仓位管理策略：初始权益 = equity_curve[0]（含持仓市值），而非纯现金
+    pm_initial = equity_curve[0] if (is_pm and equity_curve) else initial_capital
+    total_pnl = final_capital - pm_initial
+    total_return = (total_pnl / pm_initial) * 100 if pm_initial > 0 else 0
 
     # 最大衰落（%）
     equity_series = pd.Series(equity_curve)
@@ -251,7 +284,7 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
     total_years = _compute_total_years(trades, equity_curve, equity_dates)
 
     # CAGR
-    cagr = _compute_cagr(initial_capital, final_capital, total_years)
+    cagr = _compute_cagr(pm_initial, final_capital, total_years)
 
     # MAR 比率
     if abs(max_dd) > 0.01:

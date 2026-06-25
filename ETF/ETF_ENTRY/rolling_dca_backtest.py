@@ -9,13 +9,12 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import tushare as ts
 from pandas import DataFrame
 
 from core.config import BacktestConfig
 from core.data import fetch_data
-from backtest_entry.dca_utils import find_investment_dates, find_daily_investment_dates, simulate_dca, _compute_xirr
+from ETF.dca_utils import find_investment_dates, find_daily_investment_dates, simulate_dca, _compute_xirr
 
 # ============================================================
 # 配置

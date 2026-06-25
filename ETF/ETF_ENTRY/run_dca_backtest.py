@@ -15,8 +15,8 @@ import matplotlib.dates as mdates
 import matplotlib.ticker as mticker
 from pandas import DataFrame
 
-from backtest_entry.dca_utils import find_investment_dates, find_daily_investment_dates, simulate_dca, _compute_xirr
-from ETF_ENTRY.optimize_dca_day import START_DATE, END_DATE
+from ETF.dca_utils import find_investment_dates, find_daily_investment_dates, simulate_dca, _compute_xirr
+from ETF.ETF_ENTRY.optimize_dca_day import START_DATE, END_DATE
 from core.config import BacktestConfig
 from core.data import fetch_data
 from core.statistics import (

@@ -16,11 +16,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from ETF_ENTRY.rolling_dca_backtest import (
+from ETF.ETF_ENTRY.rolling_dca_backtest import (
     fetch_full_data,
     pick_widows_daily,
 )
-from ETF_ENTRY.run_dca_backtest import run_result_daily
+from ETF.ETF_ENTRY.run_dca_backtest import run_result_daily
 
 # ============================================================
 # 配置

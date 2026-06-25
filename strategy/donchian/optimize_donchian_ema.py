@@ -47,6 +47,11 @@ PER_SHARES = 100
 MAX_PYRAMID = 5
 SKIP_FIRST_ADD = False
 
+# 数据源切换: 环境变量 TURTLE_DATA_SOURCE=akshare 或命令行第二参数
+_raw_ds = sys.argv[2].lower() if len(sys.argv) > 2 else os.environ.get("TURTLE_DATA_SOURCE", "tushare")
+DATA_SOURCE = _raw_ds if _raw_ds in ("tushare", "akshare", "sina", "baostock") else "tushare"
+print(f"📡 数据源: {DATA_SOURCE}")
+
 ENTRY_PERIOD = 20
 EXIT_PERIOD = 10
 ATR_PERIOD = 14
@@ -65,20 +70,48 @@ OUTPUT_CSV = os.path.join(os.path.dirname(__file__), f"donchian_param_analysis_p
 if MARKET == "A":
     import akshare as _dummy  # noqa (仅港股需要)
 
-    def fetch_liquidity(pro, start: str, end: str):
+    def fetch_liquidity(pro, start: str, end: str, stock_source: str = "liquidity",
+                        data_source: str = "tushare"):
         """A股: 沪深300+中证500成分股 → 按日均成交额筛选>1亿"""
         # 获取沪深300成分股
         idx300 = pro.index_weight(index_code='000300.SH', start_date='20260601', end_date='20260615')
         codes_300 = idx300['con_code'].unique().tolist()
         # 获取中证500成分股
-        idx500 = pro.index_weight(index_code='000905.SH', start_date='20260601', end_date='20260615')
-        codes_500 = idx500['con_code'].unique().tolist()
+        idx1000 = pro.index_weight(index_code='000852.SH', start_date='20260601', end_date='20260615')
+        codes_1000 = idx1000['con_code'].unique().tolist()
         # 合并去重
-        candidates = list(set(codes_300 + codes_500))
+        candidates = list(set(codes_300 + codes_1000))
+
+        # ———— 股票池筛选 ————
+        if stock_source == "ai_industry":
+            ai_industries = [
+                '半导体', '软件服务', 'IT设备', '互联网', '元器件',
+                '通信设备', '电器仪表', '电脑设备', '电子制造',
+            ]
+            ai_name_keywords = [
+                '智能', '机器人', '数据', '云', '芯片', '光电',
+                'AI', '人工智能', '算力', '自动驾驶', '无人驾驶',
+                '物联网', '虚拟现实', '增强现实',
+            ]
+            df_basic = pro.stock_basic(list_status='L', fields='ts_code,name,industry')
+            ai_codes = set()
+            for _, row in df_basic.iterrows():
+                industry = str(row.get('industry', ''))
+                name = str(row.get('name', ''))
+                ts = row['ts_code']
+                if ts not in candidates:
+                    continue
+                if any(ind in industry for ind in ai_industries):
+                    ai_codes.add(ts)
+                elif any(kw in name for kw in ai_name_keywords):
+                    ai_codes.add(ts)
+            candidates = list(ai_codes)
+            print(f"AI产业筛选后候选A股: {len(candidates)} 只")
+
         rank = []
         for ts_code in candidates:
             # 拉日线
-            df = _fetch_a_share(pro, ts_code, start, end)
+            df = _fetch_a_share(pro, ts_code, start, end, data_source=data_source)
             avg_amt = df["Amount"].mean() #单位千元
             if avg_amt > 100_000:  # 日均成交额 > 1亿
                 rank.append((ts_code, avg_amt, df))
@@ -87,16 +120,49 @@ if MARKET == "A":
         return rank
 
 else:
-    def fetch_liquidity(pro, start: str, end: str):
+    def fetch_liquidity(pro, start: str, end: str, stock_source: str = "liquidity",
+                        data_source: str = "tushare"):
         """港股: 恒生指数成分股 → 按日均成交额筛选>1亿"""
         # 获取恒生指数成分股
 
         idx = pro.hk_daily(trade_date='20260615')
         candidates = idx[idx["amount"] > 1e8]["ts_code"].tolist()
+
+        # ———— 股票池筛选 ————
+        if stock_source == "ai_industry":
+            hk_ai_codes = set()
+            # 1. 恒生科技指数成分股
+            try:
+                idx_tech = pro.index_weight(index_code='HSTECH.HI',
+                                            start_date='20260601', end_date='20260615')
+                if idx_tech is not None and not idx_tech.empty:
+                    tech_codes = idx_tech['con_code'].unique().tolist()
+                    hk_ai_codes.update(c for c in tech_codes if c in candidates)
+            except Exception:
+                pass
+            # 2. hk_basic 关键词筛选
+            try:
+                hk_all = pro.hk_basic()
+                if hk_all is not None and not hk_all.empty:
+                    ai_keywords = ['科技', '软件', '半导体', '芯片', '机器人', '智能',
+                                   'AI', '互联网', '数据', '云', '电子', '计算机',
+                                   '通信', '光电', '汽车', '医药']
+                    for _, row in hk_all.iterrows():
+                        ts = row['ts_code']
+                        if ts not in candidates:
+                            continue
+                        name = str(row.get('name', ''))
+                        if any(kw in name for kw in ai_keywords):
+                            hk_ai_codes.add(ts)
+            except Exception:
+                pass
+            candidates = list(hk_ai_codes)
+            print(f"AI产业筛选后候选港股: {len(candidates)} 只")
+
         rank = []
         for ts_code in candidates:
             try:
-                df = _fetch_hk_share(pro, ts_code, start, end)
+                df = _fetch_hk_share(pro, ts_code, start, end, data_source=data_source)
             except ValueError:
                 continue
             avg_amt = df["Amount"].mean() #单位港元
@@ -394,6 +460,7 @@ def run_parameter_scan(top10_stocks,name_map) -> pd.DataFrame:
             channel_type=config.channel_type,
             bb_period=config.bb_period,
             bb_k=config.bb_k,
+            mode=config.mode,
         )
         trades, equity = _run_long_with_pyramid(df,config)
         baseline = calc_stats(trades, config.initial_capital, equity)
@@ -417,6 +484,7 @@ def run_parameter_scan(top10_stocks,name_map) -> pd.DataFrame:
                 channel_type=config.channel_type,
                 bb_period=config.bb_period,
                 bb_k=config.bb_k,
+                mode=config.mode,
             )
             trades, eq = _run_long_with_pyramid(df, config)
             metrics = calc_stats(trades, config.initial_capital, equity)
@@ -545,11 +613,12 @@ def main():
     # ---- 1. 筛选流动性 >1亿 ----
     currency = "CNY" if MARKET == "A" else "HKD"
     market_label = "A股" if MARKET == "A" else "港股"
+    stock_source = os.environ.get("STOCK_SOURCE", "liquidity")
     print("=" * 80)
-    print(f"🏆 近一年{market_label}日均成交额 >1亿")
+    print(f"🏆 近一年{market_label}日均成交额 >1亿  (股票池: {stock_source})")
     print("=" * 80)
 
-    top10 = fetch_liquidity(pro, START_DATE, END_DATE)
+    top10 = fetch_liquidity(pro, START_DATE, END_DATE, stock_source, data_source=DATA_SOURCE)
 
     if MARKET == "A":
         sb = pro.stock_basic(list_status='L', fields='ts_code,name')
