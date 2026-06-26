@@ -278,24 +278,25 @@ if __name__ == "__main__":
     #     initial_capital=40000,
     #     data_source="akshare",
     # )
-    # config = BacktestConfig(
-    #     ts_code="02015.HK",
-    #     stock_name="理想",  # 2018-09-20开市
-    #     market="HK",
-    #     mode="position_management_1",
-    #     user_dmi=True,
-    #     ema_fast=0,
-    #     ema_slow=0,
-    #     pm_start_date="20251001",
-    #     start_date="20210812",
-    #     pm_grid_up=0.02,
-    #     pm_grid_down=0.10,
-    #     pm_add_pct=0.150,
-    #     pm_reduce_pct=1.00,
-    #     pm_initial_shares=25,  # 手数（26手 = 2600股）
-    #     initial_capital=40000,
-    #     data_source="akshare",
-    #  )
+    config = BacktestConfig(
+        ts_code="02015.HK",
+        stock_name="理想",  # 2018-09-20开市
+        market="HK",
+        mode="position_management_1",
+        user_dmi=True,
+        ema_fast=0,
+        ema_slow=0,
+        pm_start_date="20251001",
+        start_date="20220813",
+        end_date="20230813",
+        pm_grid_up=0.02,
+        pm_grid_down=0.10,
+        pm_add_pct=0.150,
+        pm_reduce_pct=1.00,
+        pm_initial_shares=25,  # 手数（26手 = 2600股）
+        initial_capital=40000,
+        data_source="akshare",
+     )
     # config = BacktestConfig(
     #     ts_code="03690.HK",
     #     stock_name="美团",  # 2018-09-20开市
@@ -314,24 +315,24 @@ if __name__ == "__main__":
     #     initial_capital=40000,
     #     data_source="akshare",
     # )
-    config = BacktestConfig(
-        ts_code="01810.HK",
-        stock_name="小米",
-        market="HK",
-        mode="position_management_1",
-        pm_start_date="20251001",
-        start_date="20180709",
-        pm_grid_up=0.02,
-        pm_grid_down = 0.05,
-        pm_add_pct = 0.03,
-        pm_reduce_pct = 0.75,
-        user_dmi=True,
-        ema_fast=0,
-        ema_slow=0,
-        pm_initial_shares=8,  # 手数（26手 = 2600股）
-        initial_capital=40000,
-        data_source="akshare",
-    )
+    # config = BacktestConfig(
+    #     ts_code="01810.HK",
+    #     stock_name="小米",
+    #     market="HK",
+    #     mode="position_management_1",
+    #     pm_start_date="20251001",
+    #     start_date="20180709",
+    #     pm_grid_up=0.02,
+    #     pm_grid_down = 0.05,
+    #     pm_add_pct = 0.03,
+    #     pm_reduce_pct = 0.75,
+    #     user_dmi=True,
+    #     ema_fast=0,
+    #     ema_slow=0,
+    #     pm_initial_shares=8,  # 手数（26手 = 2600股）
+    #     initial_capital=40000,
+    #     data_source="akshare",
+    # )
     # config = BacktestConfig(
     #     ts_code="06181.HK",
     #     stock_name="老铺",

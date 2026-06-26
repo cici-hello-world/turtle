@@ -251,8 +251,8 @@ def _fetch_a_share_akshare(ts_code: str, start_date: str,
         "日期": "trade_date", "开盘": "open", "收盘": "close",
         "最高": "high", "最低": "low", "成交量": "vol", "成交额": "amount",
     })
-    # 单位转换：成交量 股→手 (/100)，成交额 元→千元 (/1000)，与 tushare 对齐
-    df["vol"] = pd.to_numeric(df["vol"], errors="coerce") / 100
+    # 单位转换：成交量已为手（东财接口 2024 年起直接返回手），成交额 元→千元 (/1000)，与 tushare 对齐
+    df["vol"] = pd.to_numeric(df["vol"], errors="coerce")
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce") / 1000
     df["open"] = pd.to_numeric(df["open"], errors="coerce")
     df["high"] = pd.to_numeric(df["high"], errors="coerce")
@@ -290,9 +290,9 @@ def _fetch_hk_share_akshare(ts_code: str, start_date: str,
         "日期": "trade_date", "开盘": "open", "收盘": "close",
         "最高": "high", "最低": "low", "成交量": "vol", "成交额": "amount",
     })
-    # 单位转换：成交量 股→手 (/100)，成交额 元→千元 (/1000)
-    df["vol"] = pd.to_numeric(df["vol"], errors="coerce") / 100
-    df["amount"] = pd.to_numeric(df["amount"], errors="coerce") / 1000
+    # 单位转换：成交量已为股（与 tushare hk_daily_adj 对齐），成交额 已为元（东财接口直接返回元）
+    df["vol"] = pd.to_numeric(df["vol"], errors="coerce")
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
     df["open"] = pd.to_numeric(df["open"], errors="coerce")
     df["high"] = pd.to_numeric(df["high"], errors="coerce")
     df["low"] = pd.to_numeric(df["low"], errors="coerce")
