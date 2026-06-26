@@ -332,10 +332,10 @@ def  run_single_scan_backtest(df_row,config: BacktestConfig) -> tuple[dict, list
                 mode=config.mode,
             )
             print(f"=========={x}_{y}_{config.ts_code} 开始生成traders===========")
-            trades, equity = run_backtest(df, config)
+            trades, equity, eq_dates = run_backtest(df, config)
             if len(trades)<6:
                 continue
-            stats = calc_stats(trades, config.initial_capital, equity)
+            stats = calc_stats(trades, config.initial_capital, equity, eq_dates)
             # if stats['胜率 (%)']<25 or stats['期望收益率']<1:
             #     continue
             # if stats['回归年度回报率 (%)']<5 or stats['R立方']<=0.8 or stats['稳健夏普比率']<=0.3:

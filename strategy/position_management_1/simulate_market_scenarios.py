@@ -16,6 +16,7 @@
 
 import sys
 import os
+from datetime import timedelta
 
 import numpy as np
 import pandas as pd
@@ -52,7 +53,7 @@ BASE_KWARGS = dict(
     data_source="akshare",
 )
 
-TRADING_DAYS = 63  # 约3个月交易日
+TRADING_DAYS = 126  # 约3个月交易日
 
 
 def get_last_price() -> float:
@@ -60,7 +61,7 @@ def get_last_price() -> float:
     from core.cache import load as cache_load
     cached = cache_load(BASE_KWARGS.get("ts_code"), BASE_KWARGS.get("market"))
     if cached is not None and not cached.empty:
-        return float(cached["Close"].iloc[-1])
+        return float(cached["Close"].iloc[-1]),cached["Date"].iloc[-1]
     raise ValueError(f"{BASE_KWARGS.get("ts_code")}未获取到缓存日线行情")
 
 
@@ -228,9 +229,24 @@ def generate_ohlcv(start_date: str, days: int, start_price: float,
     return df.reset_index(drop=True)
 
 
-def run_one_scenario(df: pd.DataFrame, base_config_kwargs: dict):
-    """在模拟数据上跑一次回测"""
-    config = BacktestConfig(**{**base_config_kwargs, **BEST_PARAMS})
+def run_one_scenario(df: pd.DataFrame, config):
+    """在模拟数据上跑一次回测，返回 (stats, trades, equity, df_sim_indicators)"""
+    # 记录模拟起始日期（拼接缓存前）
+    sim_start = df["Date"].min()
+    start_price = df["Close"].iloc[0]
+    end_price = df["Close"].iloc[-1]
+    # ---- 拼接缓存历史数据，确保指标计算有足够的预热数据 ----
+    from core.cache import load as cache_load
+    cached = cache_load(config.ts_code, config.market)
+    if cached is not None and not cached.empty:
+        hist = cached[cached["Date"] < sim_start].copy()
+        if not hist.empty:
+            common_cols = df.columns.intersection(hist.columns)
+            df = pd.concat([hist[common_cols], df[common_cols]], ignore_index=True)
+            df = df.sort_values("Date").reset_index(drop=True)
+            start_price = hist["Close"].iloc[-1]
+            print(f"   📦 已拼接缓存历史 {len(hist)} 条 (截止 {hist['Date'].max().strftime('%Y-%m-%d')})")
+
     df = compute_indicators(
         df,
         entry_period=config.entry_period,
@@ -244,9 +260,14 @@ def run_one_scenario(df: pd.DataFrame, base_config_kwargs: dict):
         am_ma_period=config.am_ma_period,
         mode=config.mode,
     )
-    trades, equity = run_backtest(df, config)
-    stats = calc_stats(trades, config.initial_capital, equity)
-    return stats, trades, equity
+    trades, equity, eq_dates = run_backtest(df, config)
+    benchmark_return = round(((end_price - start_price)/start_price)*100,2)
+    stats = calc_stats(trades, config.initial_capital, equity, eq_dates,benchmark_return=benchmark_return)
+
+    # 切回模拟期间（去掉缓存历史），用于导出日线数据
+    # df_sim = df[df["Date"] >= sim_start].copy()
+
+    return stats, trades, equity, df
 
 
 # ==================== 绘图 ====================
@@ -377,8 +398,8 @@ if __name__ == "__main__":
 
     # 1. 获取最新价格
     print(f"📥 获取{BASE_KWARGS.get("stock_name")}最新收盘价...")
-    LAST_REAL_PRICE = get_last_price()
-    print(f"   最新收盘价: {LAST_REAL_PRICE:.2f} HKD\n")
+    LAST_REAL_PRICE,LAST_DATE = get_last_price()
+    print(f"   最新收盘价: {LAST_REAL_PRICE:.2f} HKD,最新日期:{LAST_DATE}\n")
 
     # 2. 8种形态定义
     SCENARIOS = [
@@ -395,7 +416,8 @@ if __name__ == "__main__":
     sim_data = {}
     for label, trend_type in SCENARIOS:
         print(f"🕯 生成「{label}」模拟K线 ({TRADING_DAYS}天) ...")
-        df = generate_ohlcv("20260624", TRADING_DAYS, LAST_REAL_PRICE, trend_type)
+        start = (LAST_DATE + timedelta(days=1)).strftime("%Y%m%d")
+        df = generate_ohlcv(start, TRADING_DAYS, LAST_REAL_PRICE, trend_type)
         sim_data[label] = df
         sp, ep = df["Close"].iloc[0], df["Close"].iloc[-1]
         lo, hi = df["Low"].min(), df["High"].max()
@@ -412,10 +434,12 @@ if __name__ == "__main__":
     print("=" * 70)
 
     all_results = {}
+
     for label, _ in SCENARIOS:
         print(f"\n--- {label} ---")
-        stats, trades, equity = run_one_scenario(sim_data[label], BASE_KWARGS)
-        all_results[label] = {"stats": stats, "trades": trades, "equity": equity}
+        config = BacktestConfig(**{**BASE_KWARGS, **BEST_PARAMS})
+        stats, trades, equity, df_sim = run_one_scenario(sim_data[label], config)
+        all_results[label] = {"stats": stats, "trades": trades, "equity": equity, "df_sim": df_sim}
 
         print(f"  交易: {stats['总交易']}次  "
               f"加仓: {stats['盈利次数']+stats['亏损次数']}次  "
@@ -434,14 +458,15 @@ if __name__ == "__main__":
 
     # 排序输出
     sorted_labels = sorted(SCENARIOS, key=lambda x: all_results[x[0]]["stats"]["总收益率 (%)"], reverse=True)
-    print(f"{'形态':<10} {'价格变动':>10} {'总收益率':>10} {'总盈亏':>14} {'最大回撤':>10} {'交易':>6} {'夏普':>8} {'CAGR':>8}")
+    print(f"{'形态':<10} {'价格变动':>10} {'总收益率':>10} {'超额收益':>10} {'总盈亏':>14} {'最大回撤':>10} {'交易':>6} {'夏普':>8} {'CAGR':>8}")
     print("-" * 90)
     for label, _ in sorted_labels:
         s = all_results[label]["stats"]
         df = sim_data[label]
-        price_chg = (df["Close"].iloc[-1] / df["Close"].iloc[0] - 1) * 100
-        print(f"{label:<10} {price_chg:>+9.2f}% {s['总收益率 (%)']:>+9.2f}% "
-              f"{s['总盈亏 (¥)']:>+13,.0f} {s['最大回撤 (%)']:>+9.2f}% "
+        cache_df = df_sim[df_sim["Date"] < df["Date"].iloc[0]].copy()
+        price_chg = (df["Close"].iloc[-1] / cache_df["Close"].iloc[-1] - 1) * 100
+        print(f"{label:<10} {price_chg:>+9.2f}% {s['总收益率 (%)']:>+9.2f}% {s['超额收益 (%)']:>+9.2f}%"
+              f"{s['总盈亏 (¥)']:>+13,.0f}  {s['最大回撤 (%)']:>+9.2f}% "
               f"{s['总交易']:>5}  {s['夏普比率']:>7.2f} {s['CAGR (%)']:>7.2f}%")
 
     # 5. 交易明细
@@ -462,6 +487,57 @@ if __name__ == "__main__":
             print(f"  卖出均价¥{sells['Price'].mean():.2f}")
         else:
             print()
+
+    # 5b. 导出 Excel（与真实回测报告格式一致：Summary / 日线原始数据 / 仓位管理明细）
+    ts_code = BASE_KWARGS["ts_code"]
+    for label, _ in SCENARIOS:
+        r = all_results[label]
+        stats = r["stats"]
+        trades = r["trades"]
+        df_sim = r["df_sim"]
+
+        safe_label = label.replace("/", "_")
+        excel_path = f"simulate_{ts_code}_{safe_label}.xlsx"
+        with pd.ExcelWriter(os.path.join(config.output_dir, excel_path), engine="openpyxl") as writer:
+            # Summary
+            summary_data = [
+                ["形态", label],
+                ["模拟天数", TRADING_DAYS],
+                ["交易次数", stats["总交易"]],
+                ["胜率 (%)", stats["胜率 (%)"]],
+                ["赔率", stats["赔率"]],
+                ["期望收益率", stats["期望收益率"]],
+                ["总盈亏 (¥)", stats["总盈亏 (¥)"]],
+                ["总收益率 (%)", stats["总收益率 (%)"]],
+                ["超额收益 (%)", stats["超额收益 (%)"]],
+                ["最大回撤 (%)", stats["最大回撤 (%)"]],
+                ["最终资金 (¥)", stats["最终资金 (¥)"]],
+                ["夏普比率", stats["夏普比率"]],
+                ["CAGR (%)", stats["CAGR (%)"]],
+                ["MAR比率", stats["MAR比率"]],
+                ["衰落持续期 (天)", stats["衰落持续期 (天)"]],
+                ["回归年度回报率 (%)", stats["回归年度回报率 (%)"]],
+                ["R平方", stats["R平方"]],
+                ["R立方", stats["R立方"]],
+                ["稳健夏普比率", stats["稳健夏普比率"]],
+            ]
+            pd.DataFrame(summary_data, columns=["指标", "数值"]).to_excel(
+                writer, sheet_name="Summary", index=False)
+
+            # 日线原始数据（仅模拟期间，含指标）
+            df_export = df_sim.copy()
+            df_export["Date"] = df_export["Date"].dt.strftime("%Y-%m-%d")
+            df_export.to_excel(writer, sheet_name="日线原始数据", index=False)
+
+            # 仓位管理明细
+            if trades:
+                tdf = pd.DataFrame(trades)
+                pm_cols = ["Date", "Type", "Price", "Shares", "Amount",
+                           "Position_After", "Capital_After", "Equity_After",
+                           "Reference_Price", "Reason"]
+                tdf[pm_cols].to_excel(writer, sheet_name="仓位管理明细", index=False)
+
+        print(f"📁 {label}: {excel_path}")
 
     # 6. 绘图
     plot_all_klines(sim_data, all_results, f"simulate_market_klines_{BASE_KWARGS.get("ts_code")}.png")

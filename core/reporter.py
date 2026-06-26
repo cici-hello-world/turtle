@@ -15,6 +15,7 @@ def print_summary(stats: dict, config):
     print(f"   赔率：{stats['赔率']}")
     print(f"   总盈亏：{stats['总盈亏 (¥)']:,.2f}¥")
     print(f"   总收益率：{stats['总收益率 (%)']}%")
+    print(f"   超额收益：{stats['超额收益 (%)']}%")
     print(f"   最大回撤：{stats['最大回撤 (%)']}%")
     print(f"   最终资金：{stats['最终资金 (¥)']:,.2f}¥")
     print(f"   夏普比率：{stats['夏普比率']}")
@@ -57,6 +58,7 @@ def save_excel_report(df: pd.DataFrame, trades: list[dict], stats: dict, config)
             ["期望收益率", stats["期望收益率"]],
             ["总盈亏 (¥)", stats["总盈亏 (¥)"]],
             ["总收益率 (%)", stats["总收益率 (%)"]],
+            ["超额收益 (%)", stats["超额收益 (%)"]],
             ["最大回撤 (%)", stats["最大回撤 (%)"]],
             ["最终资金 (¥)", stats["最终资金 (¥)"]],
             ["夏普比率", stats["夏普比率"]],

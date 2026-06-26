@@ -21,19 +21,19 @@ from core.statistics import calc_stats
 def grid_search():
     # ==================== 固定参数（当前 run_backtest.py 活跃配置） ====================
     base_kwargs = dict(
-        ts_code="01810.HK",
-        stock_name="小米",
+        ts_code="06181.HK",
+        stock_name="老铺",
         market="HK",
         mode="position_management_1",
         per_shares=100,
         pm_start_date="20251001",
-        start_date="20180709",
+        start_date="20240628",
         user_dmi =True,
         ema_fast=0,
         ema_slow=0,
-        pm_initial_shares=8,
+        pm_initial_shares=3,
         initial_capital=40000,
-        data_source="tushare",
+        data_source="akshare",
     )
 
     # ==================== 搜索空间 ====================
@@ -100,8 +100,8 @@ def grid_search():
         )
 
         try:
-            trades, equity = run_backtest(df_base.copy(), config)
-            stats = calc_stats(trades, config.initial_capital, equity)
+            trades, equity, eq_dates = run_backtest(df_base.copy(), config)
+            stats = calc_stats(trades, config.initial_capital, equity, eq_dates)
             total_return = stats["总收益率 (%)"]
             excess = total_return - buy_hold_return  # 超额收益
 

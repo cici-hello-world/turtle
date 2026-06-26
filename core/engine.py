@@ -15,8 +15,11 @@ import numpy as np
 import pandas as pd
 
 
-def run_backtest(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
-    """统一回测入口，返回 (trades, equity_curve)"""
+def run_backtest(df: pd.DataFrame, config) -> tuple[list[dict], list[float], list]:
+    """统一回测入口，返回 (trades, equity_curve, equity_dates)
+
+    equity_dates 与 equity_curve 一一对应，均为日频（每个交易日一个点）。
+    """
     if config.mode == "long":
         return _run_long_only(df, config)
     elif config.mode == "long_more":
@@ -257,14 +260,17 @@ def _print_force_close(label, pnl, capital):
 
 # ==================== 不加仓做多 ====================
 
-def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
+def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float], list]:
     label = config.channel_type
     ps = config.per_shares
-    # _print_header(label, config.initial_capital, config.risk_percent)
 
     trades = []
     capital = config.initial_capital
+
+    start_index = config.entry_period + 1
+    start_date = df.iloc[start_index]["Date"]
     equity_curve = [config.initial_capital]
+    equity_dates = [start_date]
 
     pos = None
     entry_price = 0.0
@@ -274,20 +280,25 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
     cumulative_div = 0.0
     entry_date = None
 
-    start_index = config.entry_period + 1
-
     for i in range(start_index, len(df)):
         row = df.iloc[i]
         current_date = row["Date"]
+        close = float(row["Close"])
+
+        def _snap():
+            equity_curve.append(capital + current_shares * close * ps)
+            equity_dates.append(current_date)
 
         if pos is None:
             stop_dist, shares = _prep_entry(row, capital, config, ps)
             if shares <= 0:
+                _snap()
                 continue
 
             if _long_entry_triggered(row, config) and _ema_trend_ok(row, config):
                 cost = row["Close"] * shares * ps
                 if not _can_afford(cost, capital):
+                    _snap()
                     continue
                 pos = "long"
                 entry_price = row["Close"]
@@ -296,10 +307,8 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 cumulative_div = 0.0
                 entry_date = current_date
                 capital -= cost
-                # _print_entry(label, row["Close"], shares * ps, cost, capital, stop_loss_price)
 
         else:
-            # 除权日发放现金分红
             div_income, capital = _collect_dividend(row, current_shares, ps, capital)
             cumulative_div += div_income
 
@@ -315,14 +324,14 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                     cost_basis, pnl, capital, exit_reason,
                     stop_dist=stop_dist,
                 ))
-                equity_curve.append(capital)
-                # _print_exit(label, pnl, capital, exit_reason)
                 pos = None
                 current_shares = 0
                 cumulative_div = 0.0
                 entry_price = 0.0
                 stop_loss_price = 0.0
                 entry_date = None
+
+        _snap()
 
     # 强制平仓
     if pos == "long":
@@ -338,21 +347,24 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
             cost_basis, pnl, capital, "强制平仓",
             stop_dist=stop_dist,
         ))
-        # _print_force_close(label, pnl, capital)
+        # 强制平仓后补一个权益快照
+        equity_curve.append(capital + current_shares * last_price * ps)
+        equity_dates.append(last_date)
 
-    return trades, equity_curve
+    return trades, equity_curve, equity_dates
 
 
 # ==================== 加仓做多（金字塔） ====================
 
-def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[list[dict], list[float]]:
+def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[list[dict], list[float], list]:
     label = config.channel_type
     ps = config.per_shares
-    # _print_header(label, config.initial_capital, config.risk_percent)
 
     trades = []
     capital = config.initial_capital
-    equity_curve = [config.initial_capital]
+
+    start_index = config.entry_period + 1
+
 
     pos = None
     entry_price = 0.0
@@ -366,16 +378,21 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
     cumulative_div = 0.0
     entry_date = None
     more_info = []
-
-    start_index = config.entry_period + 1
-
+    equity_curve = []
+    equity_dates = []
     for i in range(start_index, len(df)):
         row = df.iloc[i]
         current_date = row["Date"]
+        close = float(row["Close"])
+
+        def _snap():
+            equity_curve.append(capital + current_shares * close * ps)
+            equity_dates.append(current_date)
 
         if pos is None:
             stop_dist, shares = _prep_entry(row, capital, config, ps)
             if shares <= 0:
+                _snap()
                 continue
             base_shares = shares
             skip_offset = 1 if config.skip_first_add else 0
@@ -388,6 +405,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
                 trade_cost = _pm_trade_cost(cost,config.market,"buy")
                 cost += trade_cost
                 if not _can_afford(cost, capital):
+                    _snap()
                     continue
                 pos = "long"
                 entry_price = row["Close"]
@@ -398,10 +416,8 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
                 cumulative_div = 0.0
                 entry_date = current_date
                 capital -= cost
-                # _print_entry(label, row["Close"], shares * ps, cost, capital, stop_loss_price)
 
         else:
-            # 除权日发放现金分红
             div_income, capital = _collect_dividend(row, current_shares, ps, capital)
             cumulative_div += div_income
 
@@ -418,6 +434,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
                         trade_cost = _pm_trade_cost(add_cost, config.market, "buy")
                         add_cost+= trade_cost
                         if not _can_afford(add_cost, capital):
+                            _snap()
                             continue
                         current_shares += base_shares
                         total_cost += add_cost
@@ -429,8 +446,6 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
                         if skip_offset and len(more_info) == 1:
                             print(f"  ⚠️ [{label}] 已跳过首次加仓（entry + 0.5×ATR），"
                                   f"本次为第2次加仓位")
-                        # _print_pyramid_add(label, add_price, base_shares * ps,
-                        #                   add_cost, capital, stop_loss_price)
 
             if exit_reason:
                 sell_proceeds = exit_price * current_shares * ps
@@ -445,8 +460,6 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
                     total_cost, pnl, capital, exit_reason,
                     stop_dist=stop_dist, more_info=more_info,
                 ))
-                equity_curve.append(capital)
-                # _print_exit(label, pnl, capital, exit_reason)
                 pos = None
                 current_shares = 0
                 base_shares = 0
@@ -459,8 +472,10 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
                 entry_date = None
                 more_info = []
                 if only_one:
-                    # 只交易一次
-                    return trades, equity_curve
+                    _snap()
+                    return trades, equity_curve, equity_dates
+
+        _snap()
 
     # 强制平仓
     if pos == "long":
@@ -476,20 +491,21 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
             total_cost, pnl, capital, "强制平仓",
             stop_dist=stop_dist, more_info=more_info,
         ))
-        # _print_force_close(label, pnl, capital)
-
-    return trades, equity_curve
+    return trades, equity_curve, equity_dates
 
 # ==================== 加仓做空（金字塔） ====================
 
-def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
+def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[float], list]:
     label = config.channel_type
     ps = config.per_shares
-    # _print_header(label, config.initial_capital, config.risk_percent)
 
     trades = []
     capital = config.initial_capital
+
+    start_index = config.entry_period + 1
+    start_date = df.iloc[start_index]["Date"]
     equity_curve = [config.initial_capital]
+    equity_dates = [start_date]
 
     pos = None
     entry_price = 0.0
@@ -503,15 +519,19 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
     entry_date = None
     more_info = []
 
-    start_index = config.entry_period + 1
-
     for i in range(start_index, len(df)):
         row = df.iloc[i]
         current_date = row["Date"]
+        close = float(row["Close"])
+
+        def _snap():
+            equity_curve.append(capital - current_shares * close * ps)
+            equity_dates.append(current_date)
 
         if pos is None:
             stop_dist, shares = _prep_entry(row, capital, config, ps)
             if shares <= 0:
+                _snap()
                 continue
             base_shares = shares
             skip_offset = 1 if config.skip_first_add else 0
@@ -527,7 +547,6 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
                 entry_date = current_date
                 capital += income
                 total_income += income
-                # _print_short_entry(label, row["ts_code"],entry_price, shares * ps, income, capital, stop_loss_price)
         else:
             exit_price, exit_reason = _check_short_exit(row, stop_loss_price, config)
 
@@ -549,8 +568,6 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
                         if skip_offset and len(more_info) == 1:
                             print(f"  ⚠️ [{label}] 已跳过首次加仓（entry + 0.5×ATR），"
                                   f"本次为第2次加仓位")
-                        # _print_pyramid_add(label, add_price, base_shares * ps,
-                        #                   add_income, capital, stop_loss_price)
 
             if exit_reason:
                 sale_proceeds = exit_price * current_shares * ps
@@ -563,8 +580,6 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
                     total_income, pnl, capital, exit_reason,
                     stop_dist=stop_dist, more_info=more_info,
                 ))
-                equity_curve.append(capital)
-                # _print_exit(label, pnl, capital, exit_reason)
                 pos = None
                 current_shares = 0
                 base_shares = 0
@@ -575,6 +590,8 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
                 total_income = 0.0
                 entry_date = None
                 more_info = []
+
+        _snap()
 
     # 强制平仓
     if pos == "short":
@@ -590,21 +607,25 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
             total_income, pnl, capital, "强制平仓",
             stop_dist=stop_dist, more_info=more_info,
         ))
-        # _print_force_close(label, pnl, capital)
+        equity_curve.append(capital - current_shares * last_price * ps)
+        equity_dates.append(last_date)
 
-    return trades, equity_curve
+    return trades, equity_curve, equity_dates
 
 
 # ==================== 多空双向 ====================
 
-def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
+def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float], list]:
     label = "System 1"
     PS = 100  # 多空脚本硬编码，不使用 config.per_shares
-    # _print_header(label, config.initial_capital, config.risk_percent)
 
     trades = []
     capital = config.initial_capital
+
+    start_index = config.entry_period + 1
+    start_date = df.iloc[start_index]["Date"]
     equity_curve = [config.initial_capital]
+    equity_dates = [start_date]
 
     pos = None          # None | 'long' | 'short'
     entry_price = 0.0
@@ -613,15 +634,20 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
     cumulative_div = 0.0
     entry_date = None
 
-    start_index = config.entry_period + 1
-
     for i in range(start_index, len(df)):
         row = df.iloc[i]
         current_date = row["Date"]
+        close = float(row["Close"])
+
+        def _snap():
+            # current_shares: +long, -short; 权益 = 现金 + 持仓市值
+            equity_curve.append(capital + current_shares * close * PS)
+            equity_dates.append(current_date)
 
         if pos is None:
             stop_dist, shares = _prep_entry(row, capital, config, PS)
             if shares <= 0:
+                _snap()
                 continue
 
             entry_price = row["Close"]
@@ -629,6 +655,7 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
             if _long_entry_triggered(row, config) and _ema_trend_ok(row, config):
                 cost = entry_price * shares * PS
                 if cost > capital * 0.95:
+                    _snap()
                     continue
                 pos = "long"
                 stop_loss_price = entry_price - stop_dist
@@ -636,7 +663,6 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 cumulative_div = 0.0
                 entry_date = current_date
                 capital -= cost
-                # _print_entry(label, entry_price, shares * PS, cost, capital, stop_loss_price)
 
             elif _short_entry_triggered(row, config) and _ema_trend_ok(row, config, "short"):
                 income = entry_price * shares * PS
@@ -646,10 +672,8 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                 cumulative_div = 0.0
                 entry_date = current_date
                 capital += income
-                # _print_short_entry(label, entry_price, shares * PS, income, capital, stop_loss_price)
 
         else:
-            # 仅多头收取现金分红（空头借股不享受分红）
             if pos == "long":
                 div_income, capital = _collect_dividend(row, current_shares, PS, capital)
                 cumulative_div += div_income
@@ -669,14 +693,14 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
                     entry_price, exit_price, current_shares,
                     cost_basis, pnl, capital, exit_reason,
                 ))
-                equity_curve.append(capital)
-                # _print_exit(label, pnl, capital, exit_reason)
                 pos = None
                 current_shares = 0
                 cumulative_div = 0.0
                 entry_price = 0.0
                 stop_loss_price = 0.0
                 entry_date = None
+
+        _snap()
 
     # 强制平仓
     if pos is not None:
@@ -696,14 +720,15 @@ def _run_long_short(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
             entry_price, last_price, current_shares,
             cost_basis, pnl, capital, "强制平仓",
         ))
-        # _print_force_close(label, pnl, capital)
+        equity_curve.append(capital + current_shares * last_price * PS)
+        equity_dates.append(last_date)
 
-    return trades, equity_curve
+    return trades, equity_curve, equity_dates
 
 
 # ==================== 反马丁格尔策略 (Anti-Martingale) ====================
 
-def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
+def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[float], list]:
     """反马丁格尔策略：
     - 入场：Close > MA(am_ma_period) 且 EMA 趋势过滤器允许
     - 出场：Close < MA(am_ma_period) 或 硬止损 (N×ATR)
@@ -714,12 +739,14 @@ def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[flo
 
     trades = []
     capital = config.initial_capital
-    equity_curve = [config.initial_capital]
 
-    # ---- 反马丁格尔状态：跨交易的仓位乘数 ----
+    start_index = max(config.am_ma_period, config.atr_period) + 1
+    start_date = df.iloc[start_index]["Date"]
+    equity_curve = [config.initial_capital]
+    equity_dates = [start_date]
+
     risk_multiplier = 1.0
 
-    # ---- 持仓状态 ----
     pos = None
     entry_price = 0.0
     stop_loss_price = 0.0
@@ -728,32 +755,35 @@ def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[flo
     cumulative_div = 0.0
     entry_date = None
 
-    start_index = max(config.am_ma_period, config.atr_period) + 1
-
     for i in range(start_index, len(df)):
         row = df.iloc[i]
         current_date = row["Date"]
+        close = float(row["Close"])
+
+        def _snap():
+            equity_curve.append(capital + current_shares * close * ps)
+            equity_dates.append(current_date)
 
         if pos is None:
-            # ATR 校验
             if pd.isna(row["ATR"]) or row["ATR"] == 0:
+                _snap()
                 continue
             atr = row["ATR"]
             stop_dist = config.n_value * atr
 
-            # ---- 反马丁格尔：动态风险比例 ----
             effective_risk = config.risk_per_trade * risk_multiplier
             shares = _calc_shares(capital, effective_risk, stop_dist, ps)
             if shares <= 0:
+                _snap()
                 continue
 
-            # 入场信号：Close > MA + EMA趋势过滤器
             if _am_entry_triggered(row, config) and _ema_trend_ok(row, config):
-                cost = row["Close"] * shares * ps
+                cost = close * shares * ps
                 if not _can_afford(cost, capital):
+                    _snap()
                     continue
                 pos = "long"
-                entry_price = row["Close"]
+                entry_price = close
                 stop_loss_price = entry_price - stop_dist
                 current_shares = shares
                 cumulative_div = 0.0
@@ -761,21 +791,18 @@ def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[flo
                 capital -= cost
 
         else:
-            # 除权日发放现金分红
             div_income, capital = _collect_dividend(row, current_shares, ps, capital)
             cumulative_div += div_income
 
             exit_price = None
             exit_reason = ""
 
-            # 1. 硬止损（优先）
-            if row["Close"] < stop_loss_price:
-                exit_price = row["Close"]
+            if close < stop_loss_price:
+                exit_price = close
                 exit_reason = "Hard Stop Loss (N×ATR)"
 
-            # 2. MA 趋势反转出场
             if not exit_reason and _am_exit_triggered(row, config):
-                exit_price = row["Close"]
+                exit_price = close
                 exit_reason = "Trend Reversal (MA)"
 
             if exit_reason:
@@ -789,9 +816,7 @@ def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[flo
                     cost_basis, pnl, capital, exit_reason,
                     stop_dist=stop_dist,
                 ))
-                equity_curve.append(capital)
 
-                # ---- 反马丁格尔：根据上一笔结果更新乘数 ----
                 if pnl > 0:
                     risk_multiplier = min(
                         risk_multiplier * config.am_risk_multiplier,
@@ -807,7 +832,9 @@ def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[flo
                 stop_loss_price = 0.0
                 entry_date = None
 
-    # ---- 强制平仓 ----
+        _snap()
+
+    # 强制平仓
     if pos == "long":
         last_price = df.iloc[-1]["Close"]
         last_date = df.iloc[-1]["Date"]
@@ -821,8 +848,10 @@ def _run_anti_martingale(df: pd.DataFrame, config) -> tuple[list[dict], list[flo
             cost_basis, pnl, capital, "强制平仓",
             stop_dist=stop_dist,
         ))
+        equity_curve.append(capital + current_shares * last_price * ps)
+        equity_dates.append(last_date)
 
-    return trades, equity_curve
+    return trades, equity_curve, equity_dates
 
 
 # ==================== 仓位管理策略1 (Position Management 1) ====================
@@ -845,7 +874,7 @@ def _pm_trade_cost(amount: float, market: str, trade_type: str) -> float:
             return amount * 0.0001
 
 
-def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
+def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], list[float], list]:
     """仓位管理策略1 - 网格仓位管理：
     - 从 pm_start_date 开始，持有 pm_initial_shares 手初始仓位
     - 以起始日收盘价为参考价
@@ -866,7 +895,6 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
     pm_trades = []
     capital = config.initial_capital
     current_lots = initial_lots
-    reference_price = 0.0
 
     # 定位起始日期
     start_date_str = config.pm_start_date
@@ -889,11 +917,18 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
     # 初始权益
     initial_equity = capital + current_lots * reference_price * ps
     equity_curve = [initial_equity]
+    equity_dates = [start_date]          # 与 equity_curve 一一对应的日期序列
     donchian_exit_date = None
     for i in range(start_index + 1, len(df)):
         row = df.iloc[i]
         close = float(row["Close"])
         current_date = row["Date"]
+
+        def _snap():
+            """记录当日收盘权益快照"""
+            equity_curve.append(capital + current_lots * close * ps)
+            equity_dates.append(current_date)
+
         if donchian_exit_date:
             if donchian_exit_date >= current_date:
                 continue
@@ -905,7 +940,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             # Donchian 买入：突破20日高点 + 趋势加速确认 → 加仓
             df_donchian = df.iloc[(i-(config.entry_period+1)):]
             config.initial_capital = capital
-            trades,eq =_run_long_with_pyramid(df_donchian, config)
+            trades,eq,eq_dates =_run_long_with_pyramid(df_donchian, config,True)
             if trades:
                 add_lots = trades[0].get("Shares",0)
                 total_cost = trades[0].get("Cost_¥",0)
@@ -932,7 +967,6 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                     "Equity_After": equity,
                     "Reference_Price": reference_price,
                 })
-                equity_curve.append(equity)
                 donchian_exit_date = trades[0].get("Exit Date")
                 exit_price = trades[0].get("Exit Price")
                 trade_amount = trades[0].get("Capital_After") - capital
@@ -960,7 +994,6 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                     "Equity_After": equity,
                     "Reference_Price": reference_price,
                 })
-                equity_curve.append(equity)
                 if current_lots>0:
                     #同时清仓剩余仓位
                     reduce_lots = current_lots
@@ -990,21 +1023,29 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                         "Equity_After": equity,
                         "Reference_Price": reference_price,
                     })
-                    equity_curve.append(equity)
-            # 非单边上涨时网格交易买入
+                    eq[-1] = equity
+                equity_curve.extend(eq)
+                equity_dates.extend(eq_dates)
+            # 每日收盘权益快照（不论是否发生交易）
+            else:
+                _snap()
+        # 非单边上涨时网格交易买入
         elif close <= reference_price * (1 - grid_down):
             add_value = equity_before * add_pct
             add_lots = math.ceil(add_value / (close * ps))
             if add_lots <= 0:
+                _snap()
                 continue
             if current_lots == 0 and equity_before > initial_equity * 1.3:
                 # 当前已回本停止交易
+                _snap()
                 continue
             # 仓位上限
             position_value_after = (current_lots + add_lots) * close * ps
             if position_value_after > equity_before * max_pos_pct:
                 add_lots = int((equity_before * max_pos_pct) / (close * ps)) - current_lots
                 if add_lots <= 0:
+                    _snap()
                     continue
 
             # 现金下限
@@ -1017,6 +1058,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 afford_per_lot = close * ps * (1 + (0.0012 if config.market == "HK" else 0.0006))
                 add_lots = int(max_cost / afford_per_lot) if afford_per_lot > 0 else 0
             if add_lots <= 0:
+                _snap()
                 continue
             gross_cost = close * add_lots * ps
             trade_cost = _pm_trade_cost(gross_cost, config.market, "buy")
@@ -1046,7 +1088,8 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 "Equity_After": equity,
                 "Reference_Price": reference_price,
             })
-            equity_curve.append(equity)
+            # 每日收盘权益快照（不论是否发生交易）
+            _snap()
         else:
             # ---- 非单边上涨趋势 → 网格交易 ----
             # 网格卖出（非自适应DMI模式：需空头强势才卖）
@@ -1078,18 +1121,19 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                         "Amount": net_proceeds, "Position_After": current_lots,
                         "Equity_After": equity, "Reference_Price": reference_price,
                     })
-                    equity_curve.append(equity)
-    # 追加最终权益点
-    last_close = float(df.iloc[-1]["Close"])
-    final_equity = capital + current_lots * last_close * ps
-    equity_curve.append(final_equity)
+            # 每日收盘权益快照（不论是否发生交易）
+            _snap()
 
-    return pm_trades, equity_curve
+    # 追加最终权益点（与最后一天一致，_snap 已记录）
+    # 注意：循环中 _snap() 已经覆盖了最后一天，此处无需重复
+    # 但如果 start_index+1 > len(df)-1（无交易日），则需保留初始点
+
+    return pm_trades, equity_curve, equity_dates
 
 
 # ==================== 仓位管理策略2 (Position Management 2) ====================
 
-def _run_position_management_2(df: pd.DataFrame, config) -> tuple[list[dict], list[float]]:
+def _run_position_management_2(df: pd.DataFrame, config) -> tuple[list[dict], list[float], list]:
     """仓位管理策略2 - Swing 恢复仓位管理：
     - 从 pm_start_date 开始，持有 pm_initial_shares 手初始仓位
     - 状态机：holding ↔ waiting_buyback
@@ -1134,11 +1178,18 @@ def _run_position_management_2(df: pd.DataFrame, config) -> tuple[list[dict], li
     # 初始权益
     initial_equity = capital + current_lots * recent_low * ps
     equity_curve = [initial_equity]
+    equity_dates = [start_date]
 
     for i in range(start_index + 1, len(df)):
         row = df.iloc[i]
         close = float(row["Close"])
         current_date = row["Date"]
+
+        def _snap():
+            """记录当日收盘权益快照"""
+            equity_curve.append(capital + current_lots * close * ps)
+            equity_dates.append(current_date)
+
         equity_before = capital + current_lots * close * ps
 
         # 无论什么状态，都更新近期低点（用于后续卖出参考）
@@ -1151,6 +1202,7 @@ def _run_position_management_2(df: pd.DataFrame, config) -> tuple[list[dict], li
             if close >= bounce_trigger and current_lots >= trade_lots:
                 sell_lots = min(trade_lots, current_lots)
                 if sell_lots <= 0:
+                    _snap()
                     continue
 
                 gross = close * sell_lots * ps
@@ -1171,7 +1223,6 @@ def _run_position_management_2(df: pd.DataFrame, config) -> tuple[list[dict], li
                     "Amount": net, "Position_After": current_lots,
                     "Equity_After": equity, "Reference_Price": close,
                 })
-                equity_curve.append(equity)
 
                 last_sell_price = close
                 recent_low = close      # 重置低点为卖出价
@@ -1190,6 +1241,7 @@ def _run_position_management_2(df: pd.DataFrame, config) -> tuple[list[dict], li
                     if buy_lots <= 0:
                         # 仓位已满，放弃买回，回到 holding
                         state = "holding"
+                        _snap()
                         continue
 
                 # 现金下限检查
@@ -1205,6 +1257,7 @@ def _run_position_management_2(df: pd.DataFrame, config) -> tuple[list[dict], li
                 if buy_lots <= 0:
                     # 现金不足，放弃买回，回到 holding
                     state = "holding"
+                    _snap()
                     continue
 
                 gross_cost = close * buy_lots * ps
@@ -1226,14 +1279,11 @@ def _run_position_management_2(df: pd.DataFrame, config) -> tuple[list[dict], li
                     "Amount": -total_cost, "Position_After": current_lots,
                     "Equity_After": equity, "Reference_Price": close,
                 })
-                equity_curve.append(equity)
 
                 recent_low = close
                 state = "holding"
 
-    # 追加最终权益点
-    last_close = float(df.iloc[-1]["Close"])
-    final_equity = capital + current_lots * last_close * ps
-    equity_curve.append(final_equity)
+        # 每日收盘权益快照（不论是否发生交易）
+        _snap()
 
-    return pm_trades, equity_curve
+    return pm_trades, equity_curve, equity_dates

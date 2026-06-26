@@ -12,6 +12,7 @@
     config = BacktestConfig(ts_code="000625.SZ", stock_name="长安汽车", ...)
     run(config)
 """
+import pandas as pd
 
 from core.config import BacktestConfig
 from core.data import fetch_data
@@ -51,12 +52,20 @@ def run(config: BacktestConfig):
         )
 
         # 3. 运行回测
-        trades, equity = run_backtest(df, config)
+        trades, equity, eq_dates = run_backtest(df, config)
 
-        # 4. 统计
-        stats = calc_stats(trades, config.initial_capital, equity)
+        # 4. 基准收益（同期买入持有）
+        bm_start_str = config.pm_start_date or config.start_date
+        bm_mask = df["Date"] >= pd.to_datetime(bm_start_str)
+        bm_start = df.loc[bm_mask, "Close"].iloc[0]
+        bm_end = df["Close"].iloc[-1]
+        benchmark_return = (bm_end - bm_start) / bm_start * 100
 
-        # 5. 输出报告
+        # 5. 统计
+        stats = calc_stats(trades, config.initial_capital, equity, eq_dates,
+                          benchmark_return=benchmark_return)
+
+        # 6. 输出报告
         print_summary(stats, config)
         save_excel_report(df, trades, stats, config)
 
@@ -278,25 +287,25 @@ if __name__ == "__main__":
     #     initial_capital=40000,
     #     data_source="akshare",
     # )
-    config = BacktestConfig(
-        ts_code="02015.HK",
-        stock_name="理想",  # 2018-09-20开市
-        market="HK",
-        mode="position_management_1",
-        user_dmi=True,
-        ema_fast=0,
-        ema_slow=0,
-        pm_start_date="20251001",
-        start_date="20220813",
-        end_date="20230813",
-        pm_grid_up=0.02,
-        pm_grid_down=0.10,
-        pm_add_pct=0.150,
-        pm_reduce_pct=1.00,
-        pm_initial_shares=25,  # 手数（26手 = 2600股）
-        initial_capital=40000,
-        data_source="akshare",
-     )
+    # config = BacktestConfig(
+    #     ts_code="02015.HK",
+    #     stock_name="理想",  # 2018-09-20开市
+    #     market="HK",
+    #     mode="position_management_1",
+    #     user_dmi=True,
+    #     ema_fast=0,
+    #     ema_slow=0,
+    #     pm_start_date="20251001",
+    #     start_date="20220813",
+    #     end_date="20230813",
+    #     pm_grid_up=0.02,
+    #     pm_grid_down=0.10,
+    #     pm_add_pct=0.150,
+    #     pm_reduce_pct=1.00,
+    #     pm_initial_shares=25,  # 手数（26手 = 2600股）
+    #     initial_capital=40000,
+    #     data_source="akshare",
+    #  )
     # config = BacktestConfig(
     #     ts_code="03690.HK",
     #     stock_name="美团",  # 2018-09-20开市
@@ -333,24 +342,24 @@ if __name__ == "__main__":
     #     initial_capital=40000,
     #     data_source="akshare",
     # )
-    # config = BacktestConfig(
-    #     ts_code="06181.HK",
-    #     stock_name="老铺",
-    #     market="HK",
-    #     mode="position_management_1",
-    #     start_date="20240628",
-    #     pm_start_date="20251001",
-    #     user_dmi= True,
-    #     pm_grid_up    = 0.05,
-    #     pm_grid_down  = 0.07,
-    #     pm_add_pct    = 0.030,
-    #     pm_reduce_pct = 0.50,
-    #     ema_slow = 0,
-    #     ema_fast = 0,
-    #     pm_initial_shares=3,  # 手数（26手 = 2600股）
-    #     initial_capital=40000,
-    #     data_source="akshare",
-    # )
+    config = BacktestConfig(
+        ts_code="06181.HK",
+        stock_name="老铺",
+        market="HK",
+        mode="position_management_1",
+        start_date="20240628",
+        pm_start_date="20251001",
+        user_dmi= True,
+        pm_grid_up    = 0.05,
+        pm_grid_down  = 0.07,
+        pm_add_pct    = 0.030,
+        pm_reduce_pct = 0.50,
+        ema_slow = 0,
+        ema_fast = 0,
+        pm_initial_shares=3,  # 手数（26手 = 2600股）
+        initial_capital=40000,
+        data_source="akshare",
+    )
     # config = BacktestConfig(
     #     ts_code="06181.HK",
     #     stock_name="老铺",  # 2018-09-20开市

@@ -181,8 +181,16 @@ def _compute_robust_sharpe(equity_series: pd.Series, reg_annual_return: float,
     return reg_annual_return / annualized_vol
 
 
-def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[float]) -> dict:
-    """基于交易列表和资金曲线计算统计指标"""
+def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[float],
+               equity_dates: list | None = None,
+               benchmark_return: float | None = None) -> dict:
+    """基于交易列表和资金曲线计算统计指标
+
+    equity_dates:     与 equity_curve 一一对应的日期序列（日频）。
+                      传入时直接使用，不传则从 trades 推断（兼容旧调用）。
+    benchmark_return: 同期买入持有收益率（%），用于计算超额收益。
+                      不传则超额收益为 NaN。
+    """
     empty_result = {
         "总交易": 0,
         "胜率 (%)": 0,
@@ -198,6 +206,7 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
         "平均盈亏 (¥)": 0,
         "CAGR (%)": 0,
         "MAR比率": 0,
+        "超额收益 (%)": float("nan"),
         "衰落持续期 (天)": 0,
         "回归年度回报率 (%)": 0,
         "R平方": 0,
@@ -279,9 +288,12 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
     else:
         sharpe = 0
 
-    # ——— 新增指标 ———
-    equity_dates = _build_equity_dates(trades, equity_curve)
-    total_years = _compute_total_years(trades, equity_curve, equity_dates)
+    # ——— 日期序列：优先用引擎传入的日频日期，否则从 trades 推断 ———
+    if equity_dates is not None and len(equity_dates) == len(equity_curve):
+        eq_dates = pd.Series(pd.to_datetime(equity_dates))
+    else:
+        eq_dates = _build_equity_dates(trades, equity_curve)
+    total_years = _compute_total_years(trades, equity_curve, eq_dates)
 
     # CAGR
     cagr = _compute_cagr(pm_initial, final_capital, total_years)
@@ -293,16 +305,22 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
         mar_ratio = 0
 
     # 衰落持续期
-    dd_duration = _compute_drawdown_duration(equity_series, equity_dates)
+    dd_duration = _compute_drawdown_duration(equity_series, eq_dates)
 
     # 回归年度回报率 & R²
-    reg_return, r_squared = _compute_regression_metrics(equity_series, equity_dates)
+    reg_return, r_squared = _compute_regression_metrics(equity_series, eq_dates)
 
     # 稳健夏普比率
-    robust_sharpe = _compute_robust_sharpe(equity_series, reg_return, equity_dates)
+    robust_sharpe = _compute_robust_sharpe(equity_series, reg_return, eq_dates)
 
     # R立方
-    r_cubed = _compute_r_cubed(equity_series, reg_return, equity_dates)
+    r_cubed = _compute_r_cubed(equity_series, reg_return, eq_dates)
+
+    # 超额收益：策略总收益率 - 同期买入持有收益率
+    if benchmark_return is not None:
+        excess_return = round(total_return - benchmark_return, 2)
+    else:
+        excess_return = float("nan")
 
     return {
         "总交易": total_trades,
@@ -324,6 +342,7 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
         "R平方": round(r_squared, 4),
         "稳健夏普比率": round(robust_sharpe, 2),
         "R立方": round(r_cubed, 2),
+        "超额收益 (%)": excess_return,
         "last_entry_date": last_entry_date,
         "last_exit_date": last_exit_date
     }
