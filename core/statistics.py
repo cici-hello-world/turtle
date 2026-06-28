@@ -298,8 +298,8 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
     # CAGR
     cagr = _compute_cagr(pm_initial, final_capital, total_years)
 
-    # MAR 比率
-    if abs(max_dd) > 0.01:
+    # MAR 比率 cagr为负数时失效
+    if abs(max_dd) > 0.01 and cagr>0:
         mar_ratio = (cagr * 100) / abs(max_dd)
     else:
         mar_ratio = 0

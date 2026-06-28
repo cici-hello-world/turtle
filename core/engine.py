@@ -62,8 +62,11 @@ def _dmi_trend_ok(row, config, direction: str = "long") -> bool:
     adx = row.get("ADX14", np.nan)
     adxr = row.get("ADXR", np.nan)
     adx_up = row.get("ADX_UP", np.nan)
+    adx_down = row.get("ADX_DOWN", np.nan)
     acua = row.get("ADX_CROSS_UP_ADXR", np.nan)
+    acda = row.get("ADX_CROSS_DOWN_ADXR", np.nan)
     bonus = adx_up and acua
+    trend_turn_around = adx_down and acda
     dmi_ok = (not pd.isna(adx) and not pd.isna(plus_di)
               and not pd.isna(minus_di) and not pd.isna(adxr)) and adx > 30 #强趋势才能入场
     if not config.user_dmi:
@@ -73,7 +76,7 @@ def _dmi_trend_ok(row, config, direction: str = "long") -> bool:
             is_bull_trend = plus_di > minus_di #多头趋势
         else:
             is_bull_trend = plus_di < minus_di #空头趋势
-        trend_accelerating = bonus   # 趋势加速中
+        trend_accelerating = bonus or trend_turn_around  # 趋势启动 或 趋势未调头
     else:
         is_bull_trend = False
         trend_accelerating = False
@@ -399,8 +402,8 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
             max_shares = shares * (config.max_pyramid - skip_offset)
 
             if (_long_entry_triggered(row, config)
-                    and _ema_trend_ok(row, config)
-                    and _dmi_trend_ok(row, config)):
+                    # and _dmi_trend_ok(row, config)
+                    and _ema_trend_ok(row, config)):
                 cost = row["Close"] * shares * ps
                 trade_cost = _pm_trade_cost(cost,config.market,"buy")
                 cost += trade_cost
@@ -1029,8 +1032,9 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             # 每日收盘权益快照（不论是否发生交易）
             else:
                 _snap()
-        # 非单边上涨时网格交易买入
-        elif close <= reference_price * (1 - grid_down):
+        # 非单边上涨/下跌时网格交易买入
+        elif (close <= reference_price * (1 - grid_down)
+              and not _dmi_trend_ok(row, config,"short")):
             add_value = equity_before * add_pct
             add_lots = math.ceil(add_value / (close * ps))
             if add_lots <= 0:

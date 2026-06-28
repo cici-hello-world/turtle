@@ -125,5 +125,7 @@ def compute_indicators(
         df["ADXR"] = (df["ADX14"] + df["ADX14"].shift(adx_period)) / 2
         df["ADX_UP"] = df["ADX14"] > df["ADX14"].shift(1)
         df["ADX_CROSS_UP_ADXR"] = (df["ADX14"] > df["ADXR"]) & (df["ADX14"].shift(1) <= df["ADXR"].shift(1))
+        df["ADX_DOWN"] = df["ADX14"] < df["ADX14"].shift(1)
+        df["ADX_CROSS_DOWN_ADXR"] = (df["ADX14"] < df["ADXR"]) & (df["ADX14"].shift(1) >= df["ADXR"].shift(1))
 
     return df
