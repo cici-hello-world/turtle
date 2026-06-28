@@ -49,8 +49,12 @@ class BacktestConfig:
 
     # ========== 策略模式 ==========
     mode: str = "long_more"  # "long" | "long_more" | "short_more" | "both" | "anti_martingale" | "position_management_1" | "position_management_2"
-    max_pyramid: int = 5  # 最大加仓次数（仅 long_more）
+    max_pyramid: int = 4  # 最大加仓次数（含初始仓位，Turtle 原版单一市场上限 4 单位）
     skip_first_add: bool = False  # 跳过首次加仓，总加仓次数-1（仅 long_more）
+
+    # ========== Turtle 原版系统参数 ==========
+    turtle_system: int = 1           # 1=System1(20/10), 2=System2(55/20)
+    sys1_loser_filter: bool = True   # System 1 输家突破过滤：上一笔盈利则跳过下次信号
 
     # ========== Anti-Martingale 参数（仅 anti_martingale 模式） ==========
     am_ma_period: int = 50               # MA 均线周期，用于入场/出场信号
@@ -67,7 +71,25 @@ class BacktestConfig:
     pm_max_position_pct: float = 0.9  # 仓位上限（持仓市值/权益）
     pm_min_cash_pct: float = 0.10      # 现金下限（现金/权益）
     pm_use_dmi: bool = False          # 是否启用 DMI 过滤器
-    pm_adaptive: bool = True         # 趋势自适应：上涨趋势放宽卖出、下跌趋势收紧
+    pm_adaptive: bool = True         # 趋势自适应：单边上涨趋势转入donchian通道
+    pm_dynamic_position: bool = True  # 动态仓位上限：根据波动率(ATR/价格)自动调整 max_position_pct
+    pm_dyn_vol_1: float = 0.03        # 波动率分档1：<此值为低波动
+    pm_dyn_vol_2: float = 0.06        # 波动率分档2：<此值为中波动
+    pm_dyn_vol_3: float = 0.10        # 波动率分档3：<此值为高波动（超过为极端波动）
+    pm_dyn_pos_1: float = 0.90        # 低波动仓位上限
+    pm_dyn_pos_2: float = 0.80        # 中波动仓位上限
+    pm_dyn_pos_3: float = 0.60        # 高波动仓位上限
+    pm_dyn_pos_4: float = 0.40        # 极端波动仓位上限
+
+    # ========== 自适应网格参数（ADX < 25 时切换到激进参数） ==========
+    pm_adaptive_grid: bool = True    # 是否启用自适应网格
+    pm_adx_threshold: float = 25.0   # ADX 震荡/趋势分界线
+    pm_grid_down_agg: float = 0.05   # 震荡市买入阈值（窄于保守的 grid_down）
+    pm_grid_up_agg: float = 0.04     # 震荡市卖出门槛（窄于保守的 grid_up）
+    pm_reduce_pct_agg: float = 0.50  # 震荡市卖出比例（高于保守的 reduce_pct）
+
+    # ========== 止盈与回本参数 ==========
+    pm_take_profit_ratio: float = 1.30  # 权益超过初始×该倍数后：仓位归零时停止交易，有仓位时全仓清仓
 
     # ========== Position Management 2 参数（Swing 恢复仓位管理） ==========
     # 与 PM1 不同：PM2 做非对称 swing —— 反弹卖出、回落买回，靠波动差价摊薄成本
@@ -81,6 +103,21 @@ class BacktestConfig:
 
     def __post_init__(self):
         today = pd.Timestamp.today()
+
+        # —— 自适应网格约束：震荡市应比趋势市更激进 ——
+        if self.pm_adaptive_grid and self.mode == "position_management_1":
+            if self.pm_grid_down_agg > self.pm_grid_down:
+                print(f"⚠️ [配置修正] pm_grid_down_agg({self.pm_grid_down_agg}) > "
+                      f"pm_grid_down({self.pm_grid_down})，已互换。震荡市买入间距应 ≤ 趋势市")
+                self.pm_grid_down_agg, self.pm_grid_down = self.pm_grid_down, self.pm_grid_down_agg
+            if self.pm_grid_up_agg > self.pm_grid_up:
+                print(f"⚠️ [配置修正] pm_grid_up_agg({self.pm_grid_up_agg}) > "
+                      f"pm_grid_up({self.pm_grid_up})，已互换。震荡市卖出门槛应 ≤ 趋势市")
+                self.pm_grid_up_agg, self.pm_grid_up = self.pm_grid_up, self.pm_grid_up_agg
+            if self.pm_reduce_pct_agg < self.pm_reduce_pct:
+                print(f"⚠️ [配置修正] pm_reduce_pct_agg({self.pm_reduce_pct_agg}) < "
+                      f"pm_reduce_pct({self.pm_reduce_pct})，已互换。震荡市卖出比例应 ≥ 趋势市")
+                self.pm_reduce_pct_agg, self.pm_reduce_pct = self.pm_reduce_pct, self.pm_reduce_pct_agg
 
         # 自动计算日期
         if not self.start_date:

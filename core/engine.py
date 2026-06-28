@@ -68,15 +68,15 @@ def _dmi_trend_ok(row, config, direction: str = "long") -> bool:
     bonus = adx_up and acua
     trend_turn_around = adx_down and acda
     dmi_ok = (not pd.isna(adx) and not pd.isna(plus_di)
-              and not pd.isna(minus_di) and not pd.isna(adxr)) and adx > 30 #强趋势才能入场
+              and not pd.isna(minus_di) and not pd.isna(adxr)) and adx > 35 #强趋势才能入场
     if not config.user_dmi:
         return True
     if dmi_ok:
         if direction == "long":
-            is_bull_trend = plus_di > minus_di #多头趋势
+            is_bull_trend = (plus_di - minus_di)>5 #多头趋势
         else:
             is_bull_trend = plus_di < minus_di #空头趋势
-        trend_accelerating = bonus or trend_turn_around  # 趋势启动 或 趋势未调头
+        trend_accelerating = bonus or not trend_turn_around  # 趋势启动 或 趋势未调头
     else:
         is_bull_trend = False
         trend_accelerating = False
@@ -381,6 +381,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
     cumulative_div = 0.0
     entry_date = None
     more_info = []
+    last_trade_pnl = 0.0  # System 1 输家突破过滤：上一笔盈亏
     equity_curve = []
     equity_dates = []
     for i in range(start_index, len(df)):
@@ -393,17 +394,27 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
             equity_dates.append(current_date)
 
         if pos is None:
-            stop_dist, shares = _prep_entry(row, capital, config, ps)
-            if shares <= 0:
+            if pd.isna(row["ATR"]) or row["ATR"] == 0:
                 _snap()
                 continue
-            base_shares = shares
+            atr = row["ATR"]
+            stop_dist = config.n_value * atr
+            # Turtle 1 Unit = 1% Account ÷ (N × Dollars per Point)
+            base_shares = int(0.01 * capital / (atr * ps))
+            if base_shares <= 0:
+                _snap()
+                continue
+            shares = base_shares
             skip_offset = 1 if config.skip_first_add else 0
             max_shares = shares * (config.max_pyramid - skip_offset)
 
             if (_long_entry_triggered(row, config)
                     # and _dmi_trend_ok(row, config)
                     and _ema_trend_ok(row, config)):
+                # System 1 输家突破过滤：上一笔盈利则跳过本次突破信号
+                if config.sys1_loser_filter and config.turtle_system == 1 and last_trade_pnl > 0:
+                    _snap()
+                    continue
                 cost = row["Close"] * shares * ps
                 trade_cost = _pm_trade_cost(cost,config.market,"buy")
                 cost += trade_cost
@@ -426,10 +437,10 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
 
             exit_price, exit_reason = _check_long_exit(row, stop_loss_price, config)
 
-            # 加仓（仅在未触发出场信号时检查，以入场 ATR 为基准）
-            if not exit_reason and entry_atr > 0:
+            # 加仓（仅在未触发出场信号时检查，以当前 ATR 为基准）
+            if not exit_reason and not pd.isna(row["ATR"]) and row["ATR"] > 0:
                 units_held = current_shares // base_shares + skip_offset
-                if row["Close"] > (entry_price + units_held * 0.5 * entry_atr):
+                if row["Close"] > (entry_price + units_held * 0.5 * row["ATR"]):
                     if current_shares < max_shares:
                         add_price = row["Close"]
                         stop_loss_price = add_price - config.n_value * entry_atr
@@ -456,6 +467,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
                 sell_proceeds-=trade_cost
                 pnl = sell_proceeds - total_cost + cumulative_div
                 capital += sell_proceeds
+                last_trade_pnl = pnl  # System 1 输家突破过滤：记录本笔盈亏
 
                 trades.append(_build_trade(
                     entry_date, current_date, "Long",
@@ -487,6 +499,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
         sell_proceeds = last_price * current_shares * ps
         pnl = sell_proceeds - total_cost + cumulative_div
         capital += sell_proceeds
+        last_trade_pnl = pnl  # System 1 输家突破过滤：记录本笔盈亏
 
         trades.append(_build_trade(
             entry_date, last_date, "Long",
@@ -521,6 +534,7 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
     total_income = 0.0
     entry_date = None
     more_info = []
+    last_trade_pnl = 0.0  # System 1 输家突破过滤：上一笔盈亏
 
     for i in range(start_index, len(df)):
         row = df.iloc[i]
@@ -532,15 +546,25 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
             equity_dates.append(current_date)
 
         if pos is None:
-            stop_dist, shares = _prep_entry(row, capital, config, ps)
-            if shares <= 0:
+            if pd.isna(row["ATR"]) or row["ATR"] == 0:
                 _snap()
                 continue
-            base_shares = shares
+            atr = row["ATR"]
+            stop_dist = config.n_value * atr
+            # Turtle 1 Unit = 1% Account ÷ (N × Dollars per Point)
+            base_shares = int(0.01 * capital / (atr * ps))
+            if base_shares <= 0:
+                _snap()
+                continue
+            shares = base_shares
             skip_offset = 1 if config.skip_first_add else 0
             max_shares = shares * (config.max_pyramid - skip_offset)
 
             if _short_entry_triggered(row, config) and _ema_trend_ok(row, config,"short"):
+                # System 1 输家突破过滤：上一笔盈利则跳过本次突破信号
+                if config.sys1_loser_filter and config.turtle_system == 1 and last_trade_pnl > 0:
+                    _snap()
+                    continue
                 entry_price = row["Close"]
                 entry_atr = row["ATR"]
                 income = entry_price * shares * ps
@@ -553,10 +577,10 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
         else:
             exit_price, exit_reason = _check_short_exit(row, stop_loss_price, config)
 
-            # 加仓（仅在未触发出场信号时检查，以入场 ATR 为基准）
-            if not exit_reason and entry_atr > 0:
+            # 加仓（仅在未触发出场信号时检查，以当前 ATR 为基准）
+            if not exit_reason and not pd.isna(row["ATR"]) and row["ATR"] > 0:
                 units_held = current_shares // base_shares + skip_offset
-                if row["Close"] < (entry_price - units_held * 0.5 * entry_atr) and _ema_trend_ok(row, config,"short"):
+                if row["Close"] < (entry_price - units_held * 0.5 * row["ATR"]) and _ema_trend_ok(row, config,"short"):
                     if current_shares < max_shares:
                         add_price = row["Close"]
                         stop_loss_price = add_price + config.n_value * entry_atr
@@ -576,6 +600,7 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
                 sale_proceeds = exit_price * current_shares * ps
                 pnl = total_income - sale_proceeds
                 capital -= sale_proceeds
+                last_trade_pnl = pnl  # System 1 输家突破过滤：记录本笔盈亏
 
                 trades.append(_build_trade(
                     entry_date, current_date, "short",
@@ -603,6 +628,7 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
         sale_proceeds = last_price * current_shares * ps
         pnl = total_income - sale_proceeds
         capital -= sale_proceeds
+        last_trade_pnl = pnl  # System 1 输家突破过滤：记录本笔盈亏
 
         trades.append(_build_trade(
             entry_date, last_date, "short",
@@ -894,6 +920,20 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
     grid_down = config.pm_grid_down
     max_pos_pct = config.pm_max_position_pct
     min_cash_pct = config.pm_min_cash_pct
+    dynamic_pos = config.pm_dynamic_position  # 动态仓位上限开关
+    dyn_v1 = config.pm_dyn_vol_1              # 波动率分档阈值
+    dyn_v2 = config.pm_dyn_vol_2
+    dyn_v3 = config.pm_dyn_vol_3
+    dyn_p1 = config.pm_dyn_pos_1              # 各档仓位上限
+    dyn_p2 = config.pm_dyn_pos_2
+    dyn_p3 = config.pm_dyn_pos_3
+    dyn_p4 = config.pm_dyn_pos_4
+    adaptive_grid = config.pm_adaptive_grid   # 自适应网格开关
+    adx_threshold = config.pm_adx_threshold   # ADX 震荡/趋势分界线
+    gd_agg = config.pm_grid_down_agg          # 震荡市买入阈值
+    gu_agg = config.pm_grid_up_agg            # 震荡市卖出阈值
+    rp_agg = config.pm_reduce_pct_agg         # 震荡市卖出比例
+    take_profit = config.pm_take_profit_ratio # 止盈回本倍数
 
     pm_trades = []
     capital = config.initial_capital
@@ -936,6 +976,23 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             if donchian_exit_date >= current_date:
                 continue
         equity_before = capital + current_lots * close * ps
+
+        # —— 自适应网格：ADX < 25 时切换为激进参数（窄间距 + 高卖出比例）——
+        if adaptive_grid:
+            adx_val = row.get("ADX14", np.nan)
+            if not pd.isna(adx_val) and adx_val < adx_threshold:
+                eff_grid_down = gd_agg
+                eff_grid_up   = gu_agg
+                eff_reduce    = rp_agg
+            else:
+                eff_grid_down = grid_down
+                eff_grid_up   = grid_up
+                eff_reduce    = reduce_pct
+        else:
+            eff_grid_down = grid_down
+            eff_grid_up   = grid_up
+            eff_reduce    = reduce_pct
+
         hh_entry = row.get("HH_Entry", np.nan)
         # DMI + 趋势自适应（含 ADXR 趋势强度确认）
         if config.pm_adaptive and close > hh_entry and _dmi_trend_ok(row, config):
@@ -1033,21 +1090,33 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             else:
                 _snap()
         # 非单边上涨/下跌时网格交易买入
-        elif (close <= reference_price * (1 - grid_down)
+        elif (close <= reference_price * (1 - eff_grid_down)
               and not _dmi_trend_ok(row, config,"short")):
             add_value = equity_before * add_pct
             add_lots = math.ceil(add_value / (close * ps))
             if add_lots <= 0:
                 _snap()
                 continue
-            if current_lots == 0 and equity_before > initial_equity * 1.3:
+            if current_lots == 0 and equity_before > initial_equity * take_profit:
                 # 当前已回本停止交易
                 _snap()
                 continue
-            # 仓位上限
+            # 仓位上限（动态：根据波动率 ATR/价格 自动调整）
+            if dynamic_pos and not pd.isna(row["ATR"]) and row["ATR"] > 0:
+                vol = row["ATR"] / close
+                if vol < dyn_v1:
+                    effective_max_pos = dyn_p1    # 低波动
+                elif vol < dyn_v2:
+                    effective_max_pos = dyn_p2    # 中波动
+                elif vol < dyn_v3:
+                    effective_max_pos = dyn_p3    # 高波动
+                else:
+                    effective_max_pos = dyn_p4    # 极端波动
+            else:
+                effective_max_pos = max_pos_pct
             position_value_after = (current_lots + add_lots) * close * ps
-            if position_value_after > equity_before * max_pos_pct:
-                add_lots = int((equity_before * max_pos_pct) / (close * ps)) - current_lots
+            if position_value_after > equity_before * effective_max_pos:
+                add_lots = int((equity_before * effective_max_pos) / (close * ps)) - current_lots
                 if add_lots <= 0:
                     _snap()
                     continue
@@ -1086,7 +1155,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 "PnL_¥": -total_cost,
                 "PnL_%": 0.0,
                 "Capital_After": capital,
-                "Reason": f"网格买入 -{int(grid_down * 100)}%（权益{int(add_pct * 100)}%）",
+                "Reason": f"网格买入 -{int(eff_grid_down * 100)}%（权益{int(add_pct * 100)}%）",
                 "Amount": -total_cost,
                 "Position_After": current_lots,
                 "Equity_After": equity,
@@ -1097,12 +1166,12 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
         else:
             # ---- 非单边上涨趋势 → 网格交易 ----
             # 网格卖出（非自适应DMI模式：需空头强势才卖）
-            if (close >= reference_price * (1 + grid_up)
+            if (close >= reference_price * (1 + eff_grid_up)
                     and current_lots > 0):
-                reduce_value = equity_before * reduce_pct
+                reduce_value = equity_before * eff_reduce
                 reduce_lots = math.ceil(reduce_value / (close * ps))
                 reduce_lots = min(reduce_lots, current_lots)
-                if  equity_before > initial_equity*1.3:
+                if  equity_before > initial_equity * take_profit:
                     # 当前已回本则全部清仓
                     reduce_lots=current_lots
                 if reduce_lots > 0:
@@ -1121,7 +1190,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                         "Shares": reduce_lots, "Cost_¥": trade_cost,
                         "PnL_¥": net_proceeds, "PnL_%": 0.0,
                         "Capital_After": capital,
-                        "Reason": f"网格卖出 +{int(grid_up*100)}%（权益{int(reduce_pct*100)}%）",
+                        "Reason": f"网格卖出 +{int(eff_grid_up*100)}%（权益{int(eff_reduce*100)}%）",
                         "Amount": net_proceeds, "Position_After": current_lots,
                         "Equity_After": equity, "Reference_Price": reference_price,
                     })

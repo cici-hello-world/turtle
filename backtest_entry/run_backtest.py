@@ -287,25 +287,29 @@ if __name__ == "__main__":
     #     initial_capital=40000,
     #     data_source="akshare",
     # )
-    # config = BacktestConfig(
-    #     ts_code="02015.HK",
-    #     stock_name="理想",  # 2018-09-20开市
-    #     market="HK",
-    #     mode="position_management_1",
-    #     user_dmi=True,
-    #     ema_fast=0,
-    #     ema_slow=0,
-    #     pm_start_date="20251001",
-    #     start_date="20220813",
-    #     end_date="20230813",
-    #     pm_grid_up=0.02,
-    #     pm_grid_down=0.10,
-    #     pm_add_pct=0.150,
-    #     pm_reduce_pct=1.00,
-    #     pm_initial_shares=25,  # 手数（26手 = 2600股）
-    #     initial_capital=40000,
-    #     data_source="akshare",
-    #  )
+    config = BacktestConfig(
+        ts_code="02015.HK",
+        stock_name="理想",  # 2018-09-20开市
+        market="HK",
+        mode="position_management_1",
+        user_dmi=True,
+        ema_fast=0,
+        ema_slow=0,
+        pm_start_date="20251001",
+        start_date="20220813",
+        pm_grid_down=0.10,
+        pm_grid_up = 0.03,
+        pm_reduce_pct = 0.75,
+        pm_add_pct = 0.03,
+        pm_adx_threshold = 22,
+        pm_grid_down_agg = 0.02,
+        pm_grid_up_agg = 0.02,
+        pm_reduce_pct_agg = 0.75,
+        pm_take_profit_ratio = 1.30,
+        pm_initial_shares=25,  # 手数（26手 = 2600股）
+        initial_capital=40000,
+        data_source="akshare",
+     )
     # config = BacktestConfig(
     #     ts_code="03690.HK",
     #     stock_name="美团",  # 2018-09-20开市
@@ -342,24 +346,33 @@ if __name__ == "__main__":
     #     initial_capital=40000,
     #     data_source="akshare",
     # )
-    config = BacktestConfig(
-        ts_code="06181.HK",
-        stock_name="老铺",
-        market="HK",
-        mode="position_management_1",
-        start_date="20240628",
-        pm_start_date="20251001",
-        user_dmi= True,
-        pm_grid_up    = 0.05,
-        pm_grid_down  = 0.07,
-        pm_add_pct    = 0.030,
-        pm_reduce_pct = 0.50,
-        ema_slow = 0,
-        ema_fast = 0,
-        pm_initial_shares=3,  # 手数（26手 = 2600股）
-        initial_capital=40000,
-        data_source="akshare",
-    )
+    # ========== 老铺黄金 PM1 - 旧版参考 ==========
+    # 高收益版: grid_down=0.03 grid_up=0.05 reduce=0.75 ADX=20 agg_rp=0.25 → +16.2% -17.0% 33笔
+    # 低回撤版: grid_down=0.10 grid_up=0.07 reduce=0.25 ADX=25 agg_rp=0.50 → +12.4% -6.3%  21笔
+    # ========== 老铺黄金 PM1 - 最优版（收益 +14.2%, 回撤 -6.2%, 23笔, 稳健夏普 2.74） ==========
+    # config = BacktestConfig(
+    #     ts_code="06181.HK",
+    #     stock_name="老铺",
+    #     market="HK",
+    #     mode="position_management_1",
+    #     start_date="20240628",
+    #     pm_start_date="20251001",
+    #     user_dmi=True,
+    #     pm_grid_up=0.04,
+    #     pm_grid_down=0.10,
+    #     pm_add_pct=0.02,
+    #     pm_reduce_pct=0.25,
+    #     pm_adx_threshold=25,
+    #     pm_grid_up_agg=0.03,
+    #     pm_grid_down_agg=0.05,
+    #     pm_reduce_pct_agg=0.50,
+    #     ema_slow=0,
+    #     ema_fast=0,
+    #     pm_initial_shares=3,
+    #     initial_capital=40000,
+    #     pm_dynamic_position=True,
+    #     data_source="akshare",
+    # )
     # config = BacktestConfig(
     #     ts_code="06181.HK",
     #     stock_name="老铺",  # 2018-09-20开市

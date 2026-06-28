@@ -29,26 +29,58 @@ from core.engine import run_backtest
 from core.statistics import calc_stats
 
 
-# ==================== 最优参数 ====================
+# ==================== 老铺最优参数 ====================
+# BEST_PARAMS = dict(
+#     pm_grid_up=0.04,
+#     pm_grid_down=0.10,
+#     pm_add_pct=0.02,
+#     pm_reduce_pct=0.25,
+#     pm_adx_threshold=25,
+#     pm_grid_up_agg=0.03,
+#     pm_grid_down_agg=0.05,
+#     pm_reduce_pct_agg=0.50,
+# )
+# 理想最优参数
 BEST_PARAMS = dict(
-    pm_grid_up    = 0.05,
-    pm_grid_down  = 0.07,
-    pm_add_pct    = 0.030,
-    pm_reduce_pct = 0.50,
+    pm_grid_down=0.10,
+    pm_grid_up = 0.03,
+    pm_reduce_pct = 0.75,
+    pm_add_pct = 0.03,
+    pm_adx_threshold = 22,
+    pm_grid_down_agg = 0.02,
+    pm_grid_up_agg = 0.02,
+    pm_reduce_pct_agg = 0.75,
+    pm_take_profit_ratio = 1.30,
 )
 
 # ==================== 基础配置 ====================
+# BASE_KWARGS = dict(
+#     ts_code="06181.HK",
+#     stock_name="老铺",
+#     market="HK",
+#     mode="position_management_1",
+#     pm_start_date="20260625",
+#     ema_slow = 0,
+#     ema_fast = 0,
+#     pm_initial_shares=3,
+#     initial_capital=40000,
+#     user_dmi= True,
+#     pm_dynamic_position = False,
+#     per_shares=100,
+#     data_source="akshare",
+# )
 BASE_KWARGS = dict(
-    ts_code="06181.HK",
-    stock_name="老铺",
+    ts_code="02015.HK",
+    stock_name="理想",
     market="HK",
     mode="position_management_1",
     pm_start_date="20260625",
     ema_slow = 0,
     ema_fast = 0,
-    pm_initial_shares=3,
+    pm_initial_shares=25,
     initial_capital=40000,
     user_dmi= True,
+    pm_dynamic_position = False,
     per_shares=100,
     data_source="akshare",
 )

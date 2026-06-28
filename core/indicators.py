@@ -58,8 +58,9 @@ def compute_indicators(
         ),
     )
 
-    # ATR (简单移动平均)
-    df["ATR"] = df["TR"].rolling(window=atr_period, min_periods=atr_period).mean()
+    # ATR (Wilder 平滑，等价于海龟 N 值: N = (19×PDN + TR) / 20)
+    tr_values = df["TR"].values.astype(float)
+    df["ATR"] = _wilder_smooth(tr_values, atr_period)
     # 布林线通道（仅在需要时计算）
     if channel_type == "bollinger":
         df["BB_Mid"] = df["Close"].rolling(window=bb_period, min_periods=bb_period).mean()

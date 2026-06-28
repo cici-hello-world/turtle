@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""临时脚本：仓位管理参数网格搜索，找总收益率最大的参数组合
+"""PM1 自适应网格策略 —— 全参数网格搜索
 
-搜索 pm_grid_up, pm_grid_down, pm_add_pct, pm_reduce_pct 四个参数，
-其他参数保持不变（沿用 run_backtest.py 中当前活跃配置）。
+搜索所有可微调参数的最优组合，基于真实回测总收益率评分。
+
+用法：
+  python grid_search_pm.py
 """
 
 import itertools
 import sys
 import os
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -19,139 +22,212 @@ from core.statistics import calc_stats
 
 
 def grid_search():
-    # ==================== 固定参数（当前 run_backtest.py 活跃配置） ====================
+    # ==================== 固定参数 ====================
+    # base_kwargs = dict(
+    #     ts_code="06181.HK",
+    #     stock_name="老铺",
+    #     market="HK",
+    #     mode="position_management_1",
+    #     per_shares=100,
+    #     pm_start_date="20251001",
+    #     start_date="20240628",
+    #     user_dmi=True,
+    #     pm_adaptive=True,
+    #     pm_adaptive_grid=True,
+    #     pm_dynamic_position=False,
+    #     ema_fast=0,
+    #     ema_slow=0,
+    #     pm_initial_shares=3,
+    #     initial_capital=40000,
+    #     data_source="akshare",
+    # )
     base_kwargs = dict(
-        ts_code="06181.HK",
-        stock_name="老铺",
+        ts_code="02015.HK",
+        stock_name="理想",
         market="HK",
         mode="position_management_1",
         per_shares=100,
         pm_start_date="20251001",
-        start_date="20240628",
-        user_dmi =True,
+        start_date="20220813",
+        user_dmi=True,
+        pm_adaptive=True,
+        pm_adaptive_grid=True,
+        pm_dynamic_position=False,
         ema_fast=0,
         ema_slow=0,
-        pm_initial_shares=3,
+        pm_initial_shares=25,
         initial_capital=40000,
         data_source="akshare",
     )
 
     # ==================== 搜索空间 ====================
-    pm_grid_up_values    = [0.02, 0.03, 0.05, 0.07, 0.10]
-    pm_grid_down_values  = [0.02, 0.03, 0.05, 0.07, 0.10]
-    pm_add_pct_values    = [0.03, 0.05, 0.065, 0.10, 0.15]
-    pm_reduce_pct_values = [0.25, 0.50, 0.75, 1.0]
+    pm_grid_down_vals       = [0.03, 0.05, 0.07, 0.10, 0.12]         # 5
+    pm_grid_up_vals         = [0.03, 0.04, 0.05, 0.07, 0.10]         # 5
+    pm_reduce_pct_vals      = [0.25, 0.35, 0.50, 0.75]               # 4
+    pm_add_pct_vals         = [0.015, 0.02, 0.025, 0.03]             # 4
+    pm_adx_threshold_vals   = [20, 22, 25, 28]                       # 4
+    pm_grid_down_agg_vals   = [0.02, 0.03, 0.05]                     # 3
+    pm_grid_up_agg_vals     = [0.02, 0.03, 0.04, 0.05]               # 4
+    pm_reduce_pct_agg_vals  = [0.25, 0.35, 0.50, 0.75]               # 4
+    pm_take_profit_vals     = [1.30]                                  # 1 (固定)
+    # 全量: 5×5×4×4×4×3×4×4×1 = 76,800，约束过滤后约 3.8 万 (~4分钟)
 
-    # ==================== 预加载数据（数据只取一次，指标也只算一次） ====================
-    print("📥 获取数据 & 计算指标 ...")
+    search_lists = [
+        pm_grid_down_vals, pm_grid_up_vals, pm_reduce_pct_vals, pm_add_pct_vals,
+        pm_adx_threshold_vals, pm_grid_down_agg_vals, pm_grid_up_agg_vals,
+        pm_reduce_pct_agg_vals, pm_take_profit_vals,
+    ]
+
+    total = 1
+    for lst in search_lists:
+        total *= len(lst)
+    print(f"🔍 搜索空间: {total} 种组合")
+    print(f"   grid_down: {pm_grid_down_vals}")
+    print(f"   grid_up:   {pm_grid_up_vals}")
+    print(f"   reduce:    {pm_reduce_pct_vals}")
+    print(f"   add:       {pm_add_pct_vals}")
+    print(f"   adx_thr:   {pm_adx_threshold_vals}")
+    print(f"   agg_dn:    {pm_grid_down_agg_vals}")
+    print(f"   agg_up:    {pm_grid_up_agg_vals}")
+    print(f"   agg_rp:    {pm_reduce_pct_agg_vals}")
+    print(f"   take_prof: {pm_take_profit_vals}")
+
+    # ==================== 预加载数据 ====================
+    print("\n📥 获取数据 & 计算指标 ...")
     config0 = BacktestConfig(**base_kwargs)
     df_base = fetch_data(
-        ts_code=config0.ts_code,
-        stock_name=config0.stock_name,
-        market=config0.market,
-        start_date=config0.start_date,
-        end_date=config0.end_date,
-        exchange=config0.exchange,
-        data_source=config0.data_source,
+        ts_code=config0.ts_code, stock_name=config0.stock_name, market=config0.market,
+        start_date=config0.start_date, end_date=config0.end_date,
+        exchange=config0.exchange, data_source=config0.data_source,
     )
     df_base = compute_indicators(
-        df_base,
-        entry_period=config0.entry_period,
-        exit_period=config0.exit_period,
-        atr_period=config0.atr_period,
-        ema_fast=config0.ema_fast,
-        ema_slow=config0.ema_slow,
-        channel_type=config0.channel_type,
-        bb_period=config0.bb_period,
-        bb_k=config0.bb_k,
-        am_ma_period=config0.am_ma_period,
-        mode=config0.mode,
+        df_base, entry_period=config0.entry_period, exit_period=config0.exit_period,
+        atr_period=config0.atr_period, ema_fast=config0.ema_fast, ema_slow=config0.ema_slow,
+        channel_type=config0.channel_type, bb_period=config0.bb_period, bb_k=config0.bb_k,
+        am_ma_period=config0.am_ma_period, mode=config0.mode,
     )
     print(f"   数据行数: {len(df_base)}")
 
-    # 买入持有基准收益（从仓位管理开始日 pm_start_date 算起）
     df_pm = df_base[df_base["Date"] >= config0.pm_start_date]
-    if len(df_pm) >= 2:
-        buy_hold_return = ((df_pm["Close"].iloc[-1] - df_pm["Close"].iloc[0])
-                           / df_pm["Close"].iloc[0] * 100)
-    else:
-        buy_hold_return = 0.0
+    buy_hold_return = ((df_pm["Close"].iloc[-1] - df_pm["Close"].iloc[0])
+                       / df_pm["Close"].iloc[0] * 100) if len(df_pm) >= 2 else 0.0
     print(f"   买入持有收益率 (自{config0.pm_start_date}): {buy_hold_return:+.2f}%\n")
 
     # ==================== 网格搜索 ====================
+    best_return = -float("inf")
     best_result = None
     best_stats = None
-    best_return = -float("inf")
-
-    total = (len(pm_grid_up_values) * len(pm_grid_down_values) *
-             len(pm_add_pct_values) * len(pm_reduce_pct_values))
+    best_params = None
+    results = []
     count = 0
+    skipped = 0
+    t0 = time.time()
 
-    for up, down, add, reduce in itertools.product(
-        pm_grid_up_values, pm_grid_down_values, pm_add_pct_values, pm_reduce_pct_values
-    ):
+    for gd, gu, rp, ap, adx, gda, gua, rpa, tp in itertools.product(*search_lists):
         count += 1
-        config = BacktestConfig(
-            **base_kwargs,
-            pm_grid_up=up,
-            pm_grid_down=down,
-            pm_add_pct=add,
-            pm_reduce_pct=reduce,
+        # 自适应网格约束：震荡市应比趋势市更激进
+        if gda > gd or gua > gu or rpa < rp:
+            skipped += 1
+            continue
+        params = dict(
+            pm_grid_down=gd, pm_grid_up=gu, pm_reduce_pct=rp, pm_add_pct=ap,
+            pm_adx_threshold=adx, pm_grid_down_agg=gda, pm_grid_up_agg=gua,
+            pm_reduce_pct_agg=rpa, pm_take_profit_ratio=tp,
         )
+        config = BacktestConfig(**{**base_kwargs, **params})
 
         try:
             trades, equity, eq_dates = run_backtest(df_base.copy(), config)
             stats = calc_stats(trades, config.initial_capital, equity, eq_dates)
             total_return = stats["总收益率 (%)"]
-            excess = total_return - buy_hold_return  # 超额收益
+            excess = total_return - buy_hold_return
+
+            results.append({
+                **params,
+                "return": total_return,
+                "excess": excess,
+                "trades": stats["总交易"],
+                "max_dd": stats["最大回撤 (%)"],
+                "sharpe": stats["夏普比率"],
+                "robust_sharpe": stats["稳健夏普比率"],
+                "cagr": stats["CAGR (%)"],
+                "final_capital": stats["最终资金 (¥)"],
+            })
 
             marker = ""
             if total_return > best_return:
                 best_return = total_return
-                best_result = (up, down, add, reduce)
+                best_result = (gd, gu, rp, ap, adx, gda, gua, rpa, tp)
                 best_stats = stats
+                best_params = params
                 marker = " ⭐"
 
-            print(f"[{count:3d}/{total}] "
-                  f"up={up:.2f} down={down:.2f} add={add:.3f} reduce={reduce:.2f} "
-                  f"→ 策略={total_return:7.2f}%  超额={excess:+7.2f}%{marker}")
+            elapsed = time.time() - t0
+            if count % 200 == 0 or count == 1:
+                eta = (elapsed / count) * (total - count) if count > 0 else 0
+                print(f"[{count:4d}/{total}] {elapsed:.0f}s | ETA {eta/60:.0f}min | "
+                      f"最优收益={best_return:+.2f}%{marker}")
 
         except Exception as e:
-            print(f"[{count:3d}/{total}] "
-                  f"up={up:.2f} down={down:.2f} add={add:.3f} reduce={reduce:.2f} "
-                  f"→ ❌ {e}")
+            if count % 500 == 0:
+                print(f"[{count:4d}/{total}] ⚠️ {e}")
 
-    # ==================== 输出最优 ====================
-    print("\n" + "=" * 60)
+    elapsed = time.time() - t0
+    print(f"\n✅ 完成 {len(results)} 组 (跳过 {skipped} 组违反约束), 耗时 {elapsed/60:.1f} 分钟")
+
+    # ==================== 排名输出 ====================
+    results.sort(key=lambda x: x["return"], reverse=True)
+
+    print(f"\n{'='*130}")
+    print(f"📊 TOP 30 参数组合（按总收益率排序）")
+    print(f"{'='*130}")
+    h = (f"{'#':<3} {'收益%':>7} {'超额%':>7} {'回撤%':>6} {'笔':>3} "
+         f"{'夏普':>6} {'稳夏':>6} {'g_dn':>5} {'g_up':>5} {'red%':>5} {'add%':>5} "
+         f"{'ADX':>4} {'a_dn':>5} {'a_up':>5} {'a_rp':>5} {'止盈':>5}")
+    print(h)
+    print("-" * 130)
+
+    for i, r in enumerate(results[:30], 1):
+        print(f"{i:<3} {r['return']:>7.2f} {r['excess']:>7.2f} {r['max_dd']:>6.2f} {r['trades']:>3} "
+              f"{r['sharpe']:>6.2f} {r['robust_sharpe']:>6.2f} "
+              f"{r['pm_grid_down']:>5.2f} {r['pm_grid_up']:>5.2f} {r['pm_reduce_pct']:>5.2f} {r['pm_add_pct']:>5.2f} "
+              f"{r['pm_adx_threshold']:>4.0f} {r['pm_grid_down_agg']:>5.2f} {r['pm_grid_up_agg']:>5.2f} "
+              f"{r['pm_reduce_pct_agg']:>5.2f} {r['pm_take_profit_ratio']:>5.2f}")
+
+    # ==================== 最优输出 ====================
+    print(f"\n{'='*60}")
     print("🏆 最优参数组合")
-    print("=" * 60)
-    if best_result is None:
-        print("❌ 没有找到有效结果")
-        return
-
-    up, down, add, reduce = best_result
-    best_excess = best_return - buy_hold_return
-    print(f"   pm_grid_up    = {up:.2f}")
-    print(f"   pm_grid_down  = {down:.2f}")
-    print(f"   pm_add_pct    = {add:.3f}")
-    print(f"   pm_reduce_pct = {reduce:.2f}")
+    print(f"{'='*60}")
+    gd, gu, rp, ap, adx, gda, gua, rpa, tp = best_result
+    print(f"   pm_grid_down       = {gd:.2f}")
+    print(f"   pm_grid_up         = {gu:.2f}")
+    print(f"   pm_reduce_pct      = {rp:.2f}")
+    print(f"   pm_add_pct         = {ap:.2f}")
+    print(f"   pm_adx_threshold   = {adx:.0f}")
+    print(f"   pm_grid_down_agg   = {gda:.2f}")
+    print(f"   pm_grid_up_agg     = {gua:.2f}")
+    print(f"   pm_reduce_pct_agg  = {rpa:.2f}")
+    print(f"   pm_take_profit_ratio = {tp:.2f}")
     print("-" * 60)
     print(f"   买入持有收益率  = {buy_hold_return:+.2f}%")
     print(f"   策略总收益率    = {best_return:.2f}%")
-    print(f"   超额收益       = {best_excess:+.2f}%")
+    print(f"   超额收益       = {best_return - buy_hold_return:+.2f}%")
     if best_stats:
         print(f"   总交易次数     = {best_stats['总交易']}")
-        print(f"   胜率           = {best_stats['胜率 (%)']}%")
-        print(f"   盈利次数       = {best_stats['盈利次数']}")
-        print(f"   亏损次数       = {best_stats['亏损次数']}")
         print(f"   最大回撤       = {best_stats['最大回撤 (%)']}%")
         print(f"   最终资金       = ¥{best_stats['最终资金 (¥)']:,.2f}")
-        print(f"   总盈亏         = ¥{best_stats['总盈亏 (¥)']:,.2f}")
         print(f"   夏普比率       = {best_stats['夏普比率']}")
         print(f"   CAGR           = {best_stats['CAGR (%)']}%")
         print(f"   稳健夏普比率   = {best_stats['稳健夏普比率']}")
         print(f"   R立方          = {best_stats['R立方']}")
-    print("=" * 60)
+    print(f"{'='*60}")
+
+    # 保存 Excel
+    import pandas as pd
+    out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "result")
+    os.makedirs(out_dir, exist_ok=True)
+    pd.DataFrame(results).to_excel(os.path.join(out_dir, "pm1_grid_search_results.xlsx"), index=False)
+    print(f"\n📁 完整结果: result/pm1_grid_search_results.xlsx")
 
 
 if __name__ == "__main__":
