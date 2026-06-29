@@ -268,48 +268,54 @@ if __name__ == "__main__":
     #     ema_slow=80,
     # )
 
-    # config = BacktestConfig(
-    #     ts_code="09992.HK",
-    #     stock_name="泡泡玛特",  # 20201211开市
-    #     market="HK",
-    #     mode="position_management_1",
-    #     per_shares=200,
-    #     pm_start_date="20251001",
-    #     start_date="20201211",
-    #     user_dmi=True,
-    #     ema_fast=0,
-    #     ema_slow=0,
-    #     pm_grid_up=0.1,
-    #     pm_grid_down=0.1,
-    #     pm_add_pct=0.030,
-    #     pm_reduce_pct=0.75,
-    #     pm_initial_shares=2,   # 手数（26手 = 2600股）
-    #     initial_capital=40000,
-    #     data_source="akshare",
-    # )
     config = BacktestConfig(
-        ts_code="02015.HK",
-        stock_name="理想",  # 2018-09-20开市
+        ts_code="09992.HK",
+        stock_name="泡泡玛特",  # 20201211开市
         market="HK",
         mode="position_management_1",
+        per_shares=200,
+        pm_start_date="20231101",
+        start_date="20201211",
+        end_date="20240228",
         user_dmi=True,
         ema_fast=0,
         ema_slow=0,
-        pm_start_date="20251001",
-        start_date="20220813",
-        pm_grid_down=0.10,
-        pm_grid_up = 0.03,
-        pm_reduce_pct = 0.75,
-        pm_add_pct = 0.03,
-        pm_adx_threshold = 22,
-        pm_grid_down_agg = 0.02,
-        pm_grid_up_agg = 0.02,
-        pm_reduce_pct_agg = 0.75,
-        pm_take_profit_ratio = 1.30,
-        pm_initial_shares=25,  # 手数（26手 = 2600股）
+        pm_grid_down=0.03,
+        pm_grid_up=0.05,
+        pm_reduce_pct=0.25,
+        pm_add_pct=0.01,
+        pm_adx_threshold=35,
+        pm_grid_down_agg=0.03,
+        pm_grid_up_agg=0.05,
+        pm_reduce_pct_agg=0.25,
+        pm_initial_shares=2,   # 手数（26手 = 2600股）
         initial_capital=40000,
         data_source="akshare",
-     )
+    )
+    # config = BacktestConfig(
+    #     ts_code="02015.HK",
+    #     stock_name="理想",  # 2018-09-20开市
+    #     market="HK",
+    #     mode="position_management_1",
+    #     user_dmi=True,
+    #     ema_fast=0,
+    #     ema_slow=0,
+    #     pm_start_date="20251001",
+    #     start_date="20220813",
+    #     pm_grid_down=0.05,
+    #     pm_grid_up=0.03,
+    #     pm_reduce_pct=0.25,
+    #     pm_add_pct=0.01,
+    #     pm_adx_threshold=25,
+    #     pm_grid_down_agg=0.05,
+    #     pm_grid_up_agg=0.02,
+    #     pm_reduce_pct_agg=0.5,
+    #     pm_take_profit_ratio=1.30,
+    #     pm_initial_shares=25,  # 手数（26手 = 2600股）
+    #     initial_capital=40000,
+    #     pm_dynamic_position = False,
+    #     data_source="akshare",
+    #  )
     # config = BacktestConfig(
     #     ts_code="03690.HK",
     #     stock_name="美团",  # 2018-09-20开市

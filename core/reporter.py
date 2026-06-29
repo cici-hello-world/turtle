@@ -85,7 +85,8 @@ def save_excel_report(df: pd.DataFrame, trades: list[dict], stats: dict, config)
                 df_pm = pd.DataFrame(trades)
                 pm_cols = ["Date", "Type", "Price", "Shares", "Amount",
                            "Position_After", "Capital_After", "Equity_After",
-                           "Reference_Price", "Reason"]
+                           "Reference_Price", "Reason", "+DI", "-DI", "ADX14",
+                           "ADXR","ADX_UP","ADX_CROSS_UP_ADXR","ADX_DOWN","ADX_CROSS_DOWN_ADXR"]
                 df_pm[pm_cols].to_excel(writer, sheet_name="仓位管理明细", index=False)
         else:
             # 标准策略交易明细

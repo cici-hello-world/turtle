@@ -41,36 +41,74 @@ def grid_search():
     #     initial_capital=40000,
     #     data_source="akshare",
     # )
+    # base_kwargs = dict(
+    #     ts_code="03690.HK",
+    #     stock_name="美团",
+    #     market="HK",
+    #     mode="position_management_1",
+    #     per_shares=100,
+    #     pm_start_date="20220321",
+    #     start_date="20180920",
+    #     end_date="20220922",
+    #     user_dmi=True,
+    #     pm_adaptive=True,
+    #     pm_adaptive_grid=True,
+    #     pm_dynamic_position=False,
+    #     ema_fast=0,
+    #     ema_slow=0,
+    #     pm_initial_shares=2,
+    #     initial_capital=40000,
+    #     data_source="akshare",
+    # )
+    # base_kwargs = dict(
+    #     ts_code="02015.HK",
+    #     stock_name="理想",
+    #     market="HK",
+    #     mode="position_management_1",
+    #     per_shares=100,
+    #     pm_start_date="20251001",
+    #     start_date="20220813",
+    #     user_dmi=True,
+    #     pm_adaptive=True,
+    #     pm_adaptive_grid=True,
+    #     pm_dynamic_position=True,
+    #     ema_fast=0,
+    #     ema_slow=0,
+    #     pm_initial_shares=25,
+    #     initial_capital=40000,
+    #     data_source="akshare",
+    # )
     base_kwargs = dict(
-        ts_code="02015.HK",
-        stock_name="理想",
-        market="HK",
-        mode="position_management_1",
-        per_shares=100,
-        pm_start_date="20251001",
-        start_date="20220813",
-        user_dmi=True,
-        pm_adaptive=True,
-        pm_adaptive_grid=True,
-        pm_dynamic_position=False,
-        ema_fast=0,
-        ema_slow=0,
-        pm_initial_shares=25,
-        initial_capital=40000,
-        data_source="akshare",
-    )
+            ts_code="09992.HK",
+            stock_name="泡泡玛特",
+            market="HK",
+            mode="position_management_1",
+            per_shares=200,
+            pm_start_date="20231101",
+            start_date="20201211",
+            end_date="20240228",
+            user_dmi=True,
+            pm_adaptive=True,
+            pm_adaptive_grid=True,
+            pm_dynamic_position=True,
+            ema_fast=0,
+            ema_slow=0,
+            pm_initial_shares=2,
+            initial_capital=40000,
+            data_source="akshare",
+        )
 
     # ==================== 搜索空间 ====================
     pm_grid_down_vals       = [0.03, 0.05, 0.07, 0.10, 0.12]         # 5
     pm_grid_up_vals         = [0.03, 0.04, 0.05, 0.07, 0.10]         # 5
     pm_reduce_pct_vals      = [0.25, 0.35, 0.50, 0.75]               # 4
     pm_add_pct_vals         = [0.015, 0.02, 0.025, 0.03]             # 4
-    pm_adx_threshold_vals   = [20, 22, 25, 28]                       # 4
+    pm_adx_threshold_vals   = [25, 30, 35, 40]                       # 4
     pm_grid_down_agg_vals   = [0.02, 0.03, 0.05]                     # 3
     pm_grid_up_agg_vals     = [0.02, 0.03, 0.04, 0.05]               # 4
     pm_reduce_pct_agg_vals  = [0.25, 0.35, 0.50, 0.75]               # 4
     pm_take_profit_vals     = [1.30]                                  # 1 (固定)
-    # 全量: 5×5×4×4×4×3×4×4×1 = 76,800，约束过滤后约 3.8 万 (~4分钟)
+    # 全量: 5×5×3×4×4×2×2×3×1 = 14,400，约束过滤后约 8,000
 
     search_lists = [
         pm_grid_down_vals, pm_grid_up_vals, pm_reduce_pct_vals, pm_add_pct_vals,
@@ -81,7 +119,7 @@ def grid_search():
     total = 1
     for lst in search_lists:
         total *= len(lst)
-    print(f"🔍 搜索空间: {total} 种组合")
+    print(f"🔍 搜索空间: {total:,} 种组合  (mod 由 agg 和趋势的中点自动计算)")
     print(f"   grid_down: {pm_grid_down_vals}")
     print(f"   grid_up:   {pm_grid_up_vals}")
     print(f"   reduce:    {pm_reduce_pct_vals}")
@@ -125,7 +163,7 @@ def grid_search():
 
     for gd, gu, rp, ap, adx, gda, gua, rpa, tp in itertools.product(*search_lists):
         count += 1
-        # 自适应网格约束：震荡市应比趋势市更激进
+        # 约束: agg ≤ 趋势 (震荡市应比趋势市更激进)
         if gda > gd or gua > gu or rpa < rp:
             skipped += 1
             continue
@@ -183,9 +221,9 @@ def grid_search():
     print(f"{'='*130}")
     h = (f"{'#':<3} {'收益%':>7} {'超额%':>7} {'回撤%':>6} {'笔':>3} "
          f"{'夏普':>6} {'稳夏':>6} {'g_dn':>5} {'g_up':>5} {'red%':>5} {'add%':>5} "
-         f"{'ADX':>4} {'a_dn':>5} {'a_up':>5} {'a_rp':>5} {'止盈':>5}")
+         f"{'ADX':>4} {'a_dn':>5} {'a_up':>5} {'a_rp':>5} {'m_dn':>5} {'m_up':>5} {'m_rp':>5} {'止盈':>5}")
     print(h)
-    print("-" * 130)
+    print("-" * 150)
 
     for i, r in enumerate(results[:30], 1):
         print(f"{i:<3} {r['return']:>7.2f} {r['excess']:>7.2f} {r['max_dd']:>6.2f} {r['trades']:>3} "
@@ -199,6 +237,9 @@ def grid_search():
     print("🏆 最优参数组合")
     print(f"{'='*60}")
     gd, gu, rp, ap, adx, gda, gua, rpa, tp = best_result
+    gdm = round((gda + gd) / 2, 3)
+    gum = round((gua + gu) / 2, 3)
+    rpm = round((rp + rpa) / 2, 3)
     print(f"   pm_grid_down       = {gd:.2f}")
     print(f"   pm_grid_up         = {gu:.2f}")
     print(f"   pm_reduce_pct      = {rp:.2f}")

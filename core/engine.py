@@ -66,7 +66,7 @@ def _dmi_trend_ok(row, config, direction: str = "long") -> bool:
     acua = row.get("ADX_CROSS_UP_ADXR", np.nan)
     acda = row.get("ADX_CROSS_DOWN_ADXR", np.nan)
     bonus = adx_up and acua
-    trend_turn_around = adx_down and acda
+    trend_turn_around = adx_down and not acda #趋势调头但未衰竭
     dmi_ok = (not pd.isna(adx) and not pd.isna(plus_di)
               and not pd.isna(minus_di) and not pd.isna(adxr)) and adx > 35 #强趋势才能入场
     if not config.user_dmi:
@@ -76,12 +76,70 @@ def _dmi_trend_ok(row, config, direction: str = "long") -> bool:
             is_bull_trend = (plus_di - minus_di)>5 #多头趋势
         else:
             is_bull_trend = plus_di < minus_di #空头趋势
-        trend_accelerating = bonus or not trend_turn_around  # 趋势启动 或 趋势未调头
+        trend_accelerating = bonus or trend_turn_around  # 强趋势
     else:
         is_bull_trend = False
         trend_accelerating = False
     return is_bull_trend and trend_accelerating
 
+def _dmi_trend_area(row, config, direction: str = "") -> str:
+    """dmi 趋势过滤器（增强版）。
+
+    四区定义：
+      A区 — 强势趋势：多头成立 + ADX↑ + 趋势结构确认（三条路径之一）
+            · 标准：ADX>阈值 且 ADX>ADXR
+            · 金叉领先：ADX金叉ADXR 且 ADX>15
+            · DI强势：|+DI - -DI| > 10 且 ADX>10（方向力度强，即使ADX偏低）
+      B区 — 趋势末端：多头成立 + ADX↓ + ADX>阈值 + ADX>ADXR
+      C区 — 趋势酝酿：不满足A/B + ADX↑
+      D区 — 无趋势震荡：不满足A/B + ADX↓
+
+    direction 参数：
+      "long"  → 多头需 +DI - -DI > 5（严格偏多）
+      "short" → 多头需 +DI < -DI（偏空才算多头方向）
+      ""      → 不判断方向（趋势强度由调用方结合DI自行解读）
+    """
+    plus_di = row.get("+DI", np.nan)
+    minus_di = row.get("-DI", np.nan)
+    adx = row.get("ADX14", np.nan)
+    adxr = row.get("ADXR", np.nan)
+    adx_up = row.get("ADX_UP", np.nan)
+    acua = row.get("ADX_CROSS_UP_ADXR", np.nan)    # ADX 金叉 ADXR
+    dmi_ok = (not pd.isna(adx) and not pd.isna(plus_di)
+              and not pd.isna(minus_di) and not pd.isna(adxr))
+    if not config.user_dmi:
+        return None
+    if dmi_ok:
+        # —— 方向判断 ——
+        if direction == "long":
+            is_bull_trend = (plus_di - minus_di) > 5
+        elif direction == "short":
+            is_bull_trend = (minus_di - plus_di) > 5
+        else:
+            is_bull_trend = True
+
+        threshold = config.pm_adx_threshold
+
+        # —— 趋势结构确认（三条路径，ADX下限 = min(阈值×比例, 上限)） ——
+        # 标准：ADX>阈值 且 ADX>ADXR
+        trend_standard = adx > threshold and adx > adxr
+        # 金叉领先：ADX金叉ADXR，ADX ≥ min(阈值×0.6, 15)
+        acua_flag = isinstance(acua, (bool, np.bool_)) and acua
+        trend_early = acua_flag and adx > min(threshold * 0.6, 15)
+        # DI强势：|+DI - -DI| > 10，ADX ≥ min(阈值×0.4, 10)
+        trend_di_strong = abs(plus_di - minus_di) > 10 and adx > min(threshold * 0.4, 10)
+
+        if is_bull_trend and adx_up and (trend_standard or trend_early or trend_di_strong):
+            _trend_area = "A"
+        elif is_bull_trend and not adx_up and trend_standard:
+            _trend_area = "B"
+        elif adx_up:
+            _trend_area = "C"
+        else:
+            _trend_area = "D"
+    else:
+        return None
+    return _trend_area
 
 def _calc_shares(capital: float, risk_per_trade: float, stop_dist: float,
                  per_shares: int) -> int:
@@ -929,7 +987,6 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
     dyn_p3 = config.pm_dyn_pos_3
     dyn_p4 = config.pm_dyn_pos_4
     adaptive_grid = config.pm_adaptive_grid   # 自适应网格开关
-    adx_threshold = config.pm_adx_threshold   # ADX 震荡/趋势分界线
     gd_agg = config.pm_grid_down_agg          # 震荡市买入阈值
     gu_agg = config.pm_grid_up_agg            # 震荡市卖出阈值
     rp_agg = config.pm_reduce_pct_agg         # 震荡市卖出比例
@@ -977,10 +1034,31 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 continue
         equity_before = capital + current_lots * close * ps
 
-        # —— 自适应网格：ADX < 25 时切换为激进参数（窄间距 + 高卖出比例）——
+        # —— 自适应网格：_dmi_trend_area 衡量趋势强度，调用方根据 +DI>-DI 判断多空 ——
+        #
+        # —— 自适应网格：根据DMI区域 + DI方向硬切换参数 ——
+        #   A区+多头 → 趋势参数（强势上涨，坚定持股）
+        #   B/C区+多头 → 温和参数（趋势末端/震荡向上，适度止盈）
+        #   D区/空头 → 激进参数（无趋势/逆势，防守）
         if adaptive_grid:
-            adx_val = row.get("ADX14", np.nan)
-            if not pd.isna(adx_val) and adx_val < adx_threshold:
+            _area = _dmi_trend_area(row, config)
+            plus_di = row.get("+DI", 0)
+            minus_di = row.get("-DI", 0)
+            is_bull = plus_di > minus_di
+
+            if not is_bull:
+                eff_grid_down = gd_agg
+                eff_grid_up   = gu_agg
+                eff_reduce    = rp_agg
+            elif _area == "A":
+                eff_grid_down = grid_down
+                eff_grid_up   = grid_up
+                eff_reduce    = reduce_pct
+            elif _area in ("B", "C"):
+                eff_grid_down = round((gd_agg + grid_down) / 2, 3)
+                eff_grid_up   = round((gu_agg + grid_up) / 2, 3)
+                eff_reduce    = round((rp_agg + reduce_pct) / 2, 3)
+            elif _area == "D":
                 eff_grid_down = gd_agg
                 eff_grid_up   = gu_agg
                 eff_reduce    = rp_agg
@@ -995,7 +1073,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
 
         hh_entry = row.get("HH_Entry", np.nan)
         # DMI + 趋势自适应（含 ADXR 趋势强度确认）
-        if config.pm_adaptive and close > hh_entry and _dmi_trend_ok(row, config):
+        if config.pm_adaptive and close > hh_entry and _dmi_trend_area(row, config,"long") in ("A","B"):
             # ---- 单边上涨趋势 → Donchian 通道：趋势跟踪，不轻易卖 ----
             # Donchian 买入：突破20日高点 + 趋势加速确认 → 加仓
             df_donchian = df.iloc[(i-(config.entry_period+1)):]
@@ -1026,6 +1104,14 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                     "Position_After": current_lots,
                     "Equity_After": equity,
                     "Reference_Price": reference_price,
+                    "+DI":row["+DI"],
+                    "-DI":row["-DI"],
+                    "ADX14":row["ADX14"],
+                    "ADXR":row["ADXR"],
+                    "ADX_UP": row["ADX_UP"],
+                    "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
+                    "ADX_DOWN": row["ADX_DOWN"],
+                    "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
                 })
                 donchian_exit_date = trades[0].get("Exit Date")
                 exit_price = trades[0].get("Exit Price")
@@ -1053,6 +1139,14 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                     "Position_After": current_lots,
                     "Equity_After": equity,
                     "Reference_Price": reference_price,
+                    "+DI": row["+DI"],
+                    "-DI": row["-DI"],
+                    "ADX14": row["ADX14"],
+                    "ADXR": row["ADXR"],
+                    "ADX_UP": row["ADX_UP"],
+                    "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
+                    "ADX_DOWN": row["ADX_DOWN"],
+                    "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
                 })
                 if current_lots>0:
                     #同时清仓剩余仓位
@@ -1082,6 +1176,14 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                         "Position_After": current_lots,
                         "Equity_After": equity,
                         "Reference_Price": reference_price,
+                        "+DI": row["+DI"],
+                        "-DI": row["-DI"],
+                        "ADX14": row["ADX14"],
+                        "ADXR": row["ADXR"],
+                        "ADX_UP": row["ADX_UP"],
+                        "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
+                        "ADX_DOWN": row["ADX_DOWN"],
+                        "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
                     })
                     eq[-1] = equity
                 equity_curve.extend(eq)
@@ -1091,7 +1193,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 _snap()
         # 非单边上涨/下跌时网格交易买入
         elif (close <= reference_price * (1 - eff_grid_down)
-              and not _dmi_trend_ok(row, config,"short")):
+              and _dmi_trend_area(row, config,"short") in ("C","D",None)):
             add_value = equity_before * add_pct
             add_lots = math.ceil(add_value / (close * ps))
             if add_lots <= 0:
@@ -1160,6 +1262,14 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 "Position_After": current_lots,
                 "Equity_After": equity,
                 "Reference_Price": reference_price,
+                "+DI": row["+DI"],
+                "-DI": row["-DI"],
+                "ADX14": row["ADX14"],
+                "ADXR": row["ADXR"],
+                "ADX_UP": row["ADX_UP"],
+                "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
+                "ADX_DOWN": row["ADX_DOWN"],
+                "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
             })
             # 每日收盘权益快照（不论是否发生交易）
             _snap()
@@ -1193,6 +1303,14 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                         "Reason": f"网格卖出 +{int(eff_grid_up*100)}%（权益{int(eff_reduce*100)}%）",
                         "Amount": net_proceeds, "Position_After": current_lots,
                         "Equity_After": equity, "Reference_Price": reference_price,
+                        "+DI": row["+DI"],
+                        "-DI": row["-DI"],
+                        "ADX14": row["ADX14"],
+                        "ADXR": row["ADXR"],
+                        "ADX_UP": row["ADX_UP"],
+                        "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
+                        "ADX_DOWN": row["ADX_DOWN"],
+                        "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
                     })
             # 每日收盘权益快照（不论是否发生交易）
             _snap()
