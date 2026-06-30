@@ -114,8 +114,12 @@ def _compute_r_cubed(equity_series: pd.Series, reg_annual_return: float,
     分子 RAR 用回归斜率而非端点值，分母用5次最大回撤的均值而非单次极值，
     整个指标对起止日期和数据的轻微扰动不敏感。
     """
-    if reg_annual_return <= 0:
-        return 0
+    # 最少60个交易日（约3个月），避免短周期R³极端膨胀
+    if len(equity_series) < 60:
+        return 0.0
+    # 收益接近零时返回0，避免无意义的极大/极小值
+    if abs(reg_annual_return) < 1e-10:
+        return 0.0
 
     cummax = equity_series.cummax()
     drawdown_pct = (equity_series - cummax) / cummax  # ≤0，负值表示回撤
@@ -164,8 +168,8 @@ def _compute_r_cubed(equity_series: pd.Series, reg_annual_return: float,
 def _compute_robust_sharpe(equity_series: pd.Series, reg_annual_return: float,
                           equity_dates: pd.Series | None) -> float:
     """稳健夏普比率 = 回归年度回报率 / 年度化的月度回报标准差"""
-    if len(equity_series) < 2 or reg_annual_return == 0:
-        return 0
+    if len(equity_series) < 2 or abs(reg_annual_return) < 1e-10:
+        return 0.0
     if equity_dates is None or len(equity_dates) != len(equity_series):
         return 0
     # 构建 DatetimeIndex 后按月末重采样

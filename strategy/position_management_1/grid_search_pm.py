@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
-"""PM1 自适应网格策略 —— 全参数网格搜索
+"""PM1 自适应网格策略 —— 四轮优化参数搜索
 
-搜索所有可微调参数的最优组合，基于真实回测总收益率评分。
+agg 参数由引擎根据 pm_agg_k 自动派生:
+  gda = gd × k    gua = gu × k    rpa = min(rp + (1-k)×0.5, 0.95)
+
+第1轮（粗筛）：逻辑约束 + 基本质量过滤
+第2轮（排名）：R³ 复合评分排名（不过滤，仅展示）
+第3轮（验证）：全量 8种模拟行情压力测试 → TOP 10
+第4轮（鲁棒）：参数 ±15% 扰动敏感性检验 → 最终 2-3 组候选
 
 用法：
   python grid_search_pm.py
@@ -11,6 +17,11 @@ import itertools
 import sys
 import os
 import time
+import copy
+from datetime import timedelta
+
+import numpy as np
+import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -20,6 +31,238 @@ from core.indicators import compute_indicators
 from core.engine import run_backtest
 from core.statistics import calc_stats
 
+
+# ═══════════════════════════════════════════════════════════════
+# 评分函数
+# ═══════════════════════════════════════════════════════════════
+
+def composite_score(stats: dict) -> float:
+    """个体评分（用于场景验证和敏感性检验）。
+
+    超额40% + 稳健夏普40% + 总收益10% + R³10%。
+    """
+    r3 = min(stats.get("R立方", 0.0) or 0.0, 10.0)
+    rs = stats.get("稳健夏普比率", 0.0) or 0.0
+    excess = stats.get("超额收益 (%)", 0.0) or 0.0
+
+    return (excess + 20) / 60 * 50 + (rs + 2) / 8 * 40 + r3 / 10 * 10
+
+
+def compute_percentile_scores(results: list[dict]) -> list[dict]:
+    """批量百分位归一化评分（用于第2轮排名）。
+
+    四项指标百分位加权，超额收益为主，完全免疫极端值。
+    """
+    if len(results) < 3:
+        return results
+
+    df = pd.DataFrame(results)
+    weights = {"excess": 0.50, "robust_sharpe": 0.40, "r_cubed": 0.10}
+
+    for metric, w in weights.items():
+        pcts = df[metric].rank(pct=True) * 100
+        for i, r in enumerate(results):
+            r[f"pct_{metric}"] = round(pcts.iloc[i], 1)
+
+    for r in results:
+        score = sum(r.get(f"pct_{m}", 50) * w for m, w in weights.items())
+        r["score"] = round(score, 2)
+
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════
+# agg 参数派生 (与 engine._run_position_management_1 保持一致)
+# ═══════════════════════════════════════════════════════════════
+
+def derive_agg(gd, gu, rp, k):
+    """由趋势参数 + 激进倍数 k 派生震荡市参数。
+
+    k ∈ (0, 1]:  越小越激进
+      k=0.4 → gda=gd×0.4  gua=gu×0.4  rpa=rp+0.30
+      k=1.0 → gda=gd       gua=gu       rpa=rp
+    """
+    gda = round(gd * k, 3)
+    gua = round(gu * k, 3)
+    rpa = min(round(rp + (1 - k) * 0.5, 2), 0.95)
+    return gda, gua, rpa
+
+
+# ═══════════════════════════════════════════════════════════════
+# 第3轮: 场景验证 — 预生成场景数据
+# ═══════════════════════════════════════════════════════════════
+
+# 场景概率 (来自 scenario_analysis.py 宏观估算)
+SCENARIO_PROBS = {
+    "缓慢阴跌": 0.35,
+    "震荡向下": 0.20,
+    "横盘震荡": 0.15,
+    "V形反转":  0.10,
+    "震荡向上": 0.10,
+    "单边下跌": 0.05,
+    "倒V反转":  0.03,
+    "单边上涨": 0.02,
+}
+
+SCENARIO_LABEL_MAP = {
+    "单边上涨":     "up",
+    "单边下跌":     "down",
+    "震荡向上":     "volatile_up",
+    "震荡向下":     "volatile_down",
+    "横盘震荡":     "sideways",
+    "V形反转":      "v_reversal",
+    "倒V反转":      "inv_v_reversal",
+    "缓慢阴跌":     "slow_grind_down",
+}
+
+
+def prepare_scenario_dfs(last_price: float, last_date,
+                         config0: BacktestConfig,
+                         df_base: pd.DataFrame,
+                         trading_days: int = 126) -> tuple[dict, dict]:
+    """生成8种模拟行情数据并预计算指标。
+
+    返回 (scenario_dfs, benchmark_returns)
+    - scenario_dfs: {中文标签: df_with_indicators}
+    - benchmark_returns: {中文标签: 基准收益率%}
+    """
+    from simulate_market_scenarios import generate_ohlcv
+    from core.cache import load as cache_load
+
+    cached = cache_load(config0.ts_code, config0.market)
+    start = (last_date + timedelta(days=1)).strftime("%Y%m%d")
+
+    scenario_dfs = {}
+    benchmark_returns = {}
+    for label, trend_type in SCENARIO_LABEL_MAP.items():
+        df_sim = generate_ohlcv(start, trading_days, last_price, trend_type)
+
+        sim_start = df_sim["Date"].min()
+        if cached is not None and not cached.empty:
+            hist = cached[cached["Date"] < sim_start].copy()
+            if not hist.empty:
+                common_cols = df_sim.columns.intersection(hist.columns)
+                df_sim = pd.concat([hist[common_cols], df_sim[common_cols]],
+                                   ignore_index=True)
+                df_sim = df_sim.sort_values("Date").reset_index(drop=True)
+
+        df_sim = compute_indicators(
+            df_sim,
+            entry_period=config0.entry_period,
+            exit_period=config0.exit_period,
+            atr_period=config0.atr_period,
+            ema_fast=config0.ema_fast,
+            ema_slow=config0.ema_slow,
+            channel_type=config0.channel_type,
+            bb_period=config0.bb_period,
+            bb_k=config0.bb_k,
+            am_ma_period=config0.am_ma_period,
+            mode=config0.mode,
+        )
+        scenario_dfs[label] = df_sim
+
+        # 计算该场景的买入持有基准收益
+        sim_mask = df_sim["Date"] >= sim_start
+        sim_close = df_sim.loc[sim_mask, "Close"]
+        sp = float(sim_close.iloc[0])
+        ep = float(sim_close.iloc[-1])
+        bm = (ep - sp) / sp * 100
+        benchmark_returns[label] = bm
+        print(f"     ✓ {label}: ¥{sp:.1f}→¥{ep:.1f} ({bm:+.1f}%)")
+
+    return scenario_dfs, benchmark_returns
+
+
+# ═══════════════════════════════════════════════════════════════
+# 第4轮: 参数敏感性检验
+# ═══════════════════════════════════════════════════════════════
+
+def sensitivity_test(params: dict, base_kwargs: dict, df_base: pd.DataFrame,
+                     benchmark_return: float = 0.0,
+                     perturb_pct: float = 0.15) -> dict:
+    """对一组参数做 ±perturb_pct 扰动，评估得分稳定性。
+
+    k 的扰动会让所有 agg 参数联动变化。
+    """
+    perturb_params = [
+        "pm_grid_down", "pm_grid_up",
+        "pm_reduce_pct", "pm_add_pct",
+        "pm_agg_k",
+    ]
+
+    # 基准得分
+    config_base = BacktestConfig(**{**base_kwargs, **params})
+    trades, equity, eq_dates = run_backtest(df_base.copy(), config_base)
+    stats_base = calc_stats(trades, config_base.initial_capital, equity, eq_dates,
+                            benchmark_return=benchmark_return)
+    base_score = composite_score(stats_base)
+
+    perturbed_scores = []
+    for pname in perturb_params:
+        base_val = params.get(pname)
+        if base_val is None:
+            continue
+
+        # 向上扰动
+        up_val = base_val * (1 + perturb_pct)
+        if pname == "pm_reduce_pct":
+            up_val = min(up_val, 0.95)
+        elif pname == "pm_agg_k":
+            up_val = min(up_val, 1.0)
+        p_up = copy.deepcopy(params)
+        p_up[pname] = round(up_val, 3)
+        if _constraint_ok(p_up):
+            try:
+                config_up = BacktestConfig(**{**base_kwargs, **p_up})
+                t, e, ed = run_backtest(df_base.copy(), config_up)
+                s_up = calc_stats(t, config_up.initial_capital, e, ed,
+                                  benchmark_return=benchmark_return)
+                perturbed_scores.append(composite_score(s_up))
+            except Exception:
+                pass
+
+        # 向下扰动
+        down_val = base_val * (1 - perturb_pct)
+        if pname == "pm_add_pct":
+            down_val = max(down_val, 0.005)
+        elif pname == "pm_agg_k":
+            down_val = max(down_val, 0.2)
+        p_down = copy.deepcopy(params)
+        p_down[pname] = round(down_val, 3)
+        if _constraint_ok(p_down):
+            try:
+                config_down = BacktestConfig(**{**base_kwargs, **p_down})
+                t, e, ed = run_backtest(df_base.copy(), config_down)
+                s_down = calc_stats(t, config_down.initial_capital, e, ed,
+                                    benchmark_return=benchmark_return)
+                perturbed_scores.append(composite_score(s_down))
+            except Exception:
+                pass
+
+    if not perturbed_scores:
+        return {"base_score": base_score, "avg_perturbed": base_score, "decay_pct": 0.0}
+
+    avg_perturbed = float(np.mean(perturbed_scores))
+    if base_score > 0:
+        decay_pct = (base_score - avg_perturbed) / base_score * 100
+    else:
+        decay_pct = (base_score - avg_perturbed) / max(abs(base_score), 0.01) * 100
+
+    return {"base_score": base_score, "avg_perturbed": avg_perturbed, "decay_pct": decay_pct}
+
+
+def _constraint_ok(params: dict) -> bool:
+    """检查参数是否满足逻辑约束"""
+    gd = params.get("pm_grid_down", 0)
+    gu = params.get("pm_grid_up", 0)
+    rp = params.get("pm_reduce_pct", 0)
+    ap = params.get("pm_add_pct", 0)
+    return gd > gu and rp > ap
+
+
+# ═══════════════════════════════════════════════════════════════
+# 主流程
+# ═══════════════════════════════════════════════════════════════
 
 def grid_search():
     # ==================== 固定参数 ====================
@@ -84,51 +327,47 @@ def grid_search():
             market="HK",
             mode="position_management_1",
             per_shares=200,
-            pm_start_date="20231101",
+            pm_start_date="20251001",
             start_date="20201211",
-            end_date="20240228",
             user_dmi=True,
             pm_adaptive=True,
             pm_adaptive_grid=True,
-            pm_dynamic_position=True,
+            pm_dynamic_position=False,
             ema_fast=0,
             ema_slow=0,
             pm_initial_shares=2,
             initial_capital=40000,
             data_source="akshare",
         )
-
+   
     # ==================== 搜索空间 ====================
+    # 趋势参数 (4维)
     pm_grid_down_vals       = [0.03, 0.05, 0.07, 0.10, 0.12]         # 5
     pm_grid_up_vals         = [0.03, 0.04, 0.05, 0.07, 0.10]         # 5
     pm_reduce_pct_vals      = [0.25, 0.35, 0.50, 0.75]               # 4
-    pm_add_pct_vals         = [0.015, 0.02, 0.025, 0.03]             # 4
-    pm_adx_threshold_vals   = [25, 30, 35, 40]                       # 4
-    pm_grid_down_agg_vals   = [0.02, 0.03, 0.05]                     # 3
-    pm_grid_up_agg_vals     = [0.02, 0.03, 0.04, 0.05]               # 4
-    pm_reduce_pct_agg_vals  = [0.25, 0.35, 0.50, 0.75]               # 4
+    pm_add_pct_vals         = [0.25, 0.30, 0.35, 0.40, 0.50]         # 5 (floor后1手≈3.2万,权益≈10万,需≥31%买1手)
+    pm_adx_threshold_vals   = [25]                                  # 1 (固定，空头日短路无效)
+    # 激进倍数 k: agg = f(趋势, k) 在引擎中自动派生
+    k_vals                  = [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]   # 7
     pm_take_profit_vals     = [1.30]                                  # 1 (固定)
-    # 全量: 5×5×3×4×4×2×2×3×1 = 14,400，约束过滤后约 8,000
+    # 全量: 5×5×4×5×1×7×1 = 3,500，约束过滤后约 1,200
 
     search_lists = [
         pm_grid_down_vals, pm_grid_up_vals, pm_reduce_pct_vals, pm_add_pct_vals,
-        pm_adx_threshold_vals, pm_grid_down_agg_vals, pm_grid_up_agg_vals,
-        pm_reduce_pct_agg_vals, pm_take_profit_vals,
+        pm_adx_threshold_vals, k_vals, pm_take_profit_vals,
     ]
 
     total = 1
     for lst in search_lists:
         total *= len(lst)
-    print(f"🔍 搜索空间: {total:,} 种组合  (mod 由 agg 和趋势的中点自动计算)")
-    print(f"   grid_down: {pm_grid_down_vals}")
-    print(f"   grid_up:   {pm_grid_up_vals}")
-    print(f"   reduce:    {pm_reduce_pct_vals}")
-    print(f"   add:       {pm_add_pct_vals}")
-    print(f"   adx_thr:   {pm_adx_threshold_vals}")
-    print(f"   agg_dn:    {pm_grid_down_agg_vals}")
-    print(f"   agg_up:    {pm_grid_up_agg_vals}")
-    print(f"   agg_rp:    {pm_reduce_pct_agg_vals}")
-    print(f"   take_prof: {pm_take_profit_vals}")
+    print(f"🔍 搜索空间: {total:,} 种组合")
+    print(f"  趋势参数: gd={pm_grid_down_vals}")
+    print(f"           gu={pm_grid_up_vals}")
+    print(f"           rp={pm_reduce_pct_vals}")
+    print(f"           ap={pm_add_pct_vals}")
+    print(f"           adx={pm_adx_threshold_vals}")
+    print(f"  激进倍数: k={k_vals}  →  agg 由引擎派生 (gda=gd×k, gua=gu×k, rpa=rp+(1-k)×0.5)")
+    print(f"  止盈倍数: {pm_take_profit_vals}")
 
     # ==================== 预加载数据 ====================
     print("\n📥 获取数据 & 计算指标 ...")
@@ -151,124 +390,378 @@ def grid_search():
                        / df_pm["Close"].iloc[0] * 100) if len(df_pm) >= 2 else 0.0
     print(f"   买入持有收益率 (自{config0.pm_start_date}): {buy_hold_return:+.2f}%\n")
 
-    # ==================== 网格搜索 ====================
-    best_return = -float("inf")
-    best_result = None
-    best_stats = None
-    best_params = None
-    results = []
+    # ═══════════════════════════════════════════════════
+    # 第1轮: 粗筛 — 逻辑约束 + 基本质量过滤
+    # ═══════════════════════════════════════════════════
+    print("=" * 70)
+    print("🔵 第1轮: 粗筛（逻辑约束 + 基本质量过滤）")
+    print("=" * 70)
+    print("  约束: gd>gu  rp>ap  (agg 由引擎根据 k 自动派生)")
+    print("  过滤: 交易次数>0  最大回撤>-50%\n")
+
+    all_results = []
     count = 0
-    skipped = 0
+    skipped_constraint = 0
+    skipped_quality = 0
     t0 = time.time()
 
-    for gd, gu, rp, ap, adx, gda, gua, rpa, tp in itertools.product(*search_lists):
+    for gd, gu, rp, ap, adx, k, tp in itertools.product(*search_lists):
         count += 1
-        # 约束: agg ≤ 趋势 (震荡市应比趋势市更激进)
-        if gda > gd or gua > gu or rpa < rp:
-            skipped += 1
+
+        # ── 逻辑约束 ──
+        if gd <= gu:
+            skipped_constraint += 1
             continue
+        if rp <= ap:
+            skipped_constraint += 1
+            continue
+
         params = dict(
             pm_grid_down=gd, pm_grid_up=gu, pm_reduce_pct=rp, pm_add_pct=ap,
-            pm_adx_threshold=adx, pm_grid_down_agg=gda, pm_grid_up_agg=gua,
-            pm_reduce_pct_agg=rpa, pm_take_profit_ratio=tp,
+            pm_adx_threshold=adx, pm_agg_k=k, pm_take_profit_ratio=tp,
         )
         config = BacktestConfig(**{**base_kwargs, **params})
 
         try:
             trades, equity, eq_dates = run_backtest(df_base.copy(), config)
             stats = calc_stats(trades, config.initial_capital, equity, eq_dates)
+
+            n_trades = stats["总交易"]
+            max_dd = stats["最大回撤 (%)"]
+
+            # ── 基本质量过滤 ──
+            if n_trades == 0:
+                skipped_quality += 1
+                continue
+            if max_dd < -50:
+                skipped_quality += 1
+                continue
+
             total_return = stats["总收益率 (%)"]
             excess = total_return - buy_hold_return
+            r3 = stats["R立方"]
+            rs = stats["稳健夏普比率"]
+            gda, gua, rpa = derive_agg(gd, gu, rp, k)
 
-            results.append({
+            all_results.append({
                 **params,
+                "gda": gda, "gua": gua, "rpa": rpa,
                 "return": total_return,
                 "excess": excess,
-                "trades": stats["总交易"],
-                "max_dd": stats["最大回撤 (%)"],
+                "trades": n_trades,
+                "max_dd": max_dd,
                 "sharpe": stats["夏普比率"],
-                "robust_sharpe": stats["稳健夏普比率"],
+                "robust_sharpe": rs,
                 "cagr": stats["CAGR (%)"],
                 "final_capital": stats["最终资金 (¥)"],
+                "r_cubed": r3,
+                "score": 0.0,  # 占位，第2轮百分位归一化后填入
             })
-
-            marker = ""
-            if total_return > best_return:
-                best_return = total_return
-                best_result = (gd, gu, rp, ap, adx, gda, gua, rpa, tp)
-                best_stats = stats
-                best_params = params
-                marker = " ⭐"
-
-            elapsed = time.time() - t0
-            if count % 200 == 0 or count == 1:
-                eta = (elapsed / count) * (total - count) if count > 0 else 0
-                print(f"[{count:4d}/{total}] {elapsed:.0f}s | ETA {eta/60:.0f}min | "
-                      f"最优收益={best_return:+.2f}%{marker}")
 
         except Exception as e:
             if count % 500 == 0:
-                print(f"[{count:4d}/{total}] ⚠️ {e}")
+                print(f"   [{count:4d}/{total}] ⚠️ {e}")
+
+        elapsed = time.time() - t0
+        if count % 500 == 0:
+            eta = (elapsed / count) * (total - count) if count > 0 else 0
+            print(f"   [{count:4d}/{total}] {elapsed:.0f}s | ETA {eta/60:.0f}min | "
+                  f"通过: {len(all_results)} | 约束过滤: {skipped_constraint} | 质量过滤: {skipped_quality}")
 
     elapsed = time.time() - t0
-    print(f"\n✅ 完成 {len(results)} 组 (跳过 {skipped} 组违反约束), 耗时 {elapsed/60:.1f} 分钟")
+    print(f"\n✅ 第1轮完成: 通过 {len(all_results)} 组 "
+          f"(约束过滤 {skipped_constraint}, 质量过滤 {skipped_quality}), "
+          f"耗时 {elapsed/60:.1f} 分钟\n")
 
-    # ==================== 排名输出 ====================
-    results.sort(key=lambda x: x["return"], reverse=True)
+    # ═══════════════════════════════════════════════════
+    # 第2轮: 排名 — 百分位归一化评分（不过滤，排名展示）
+    # ═══════════════════════════════════════════════════
+    print("=" * 70)
+    print("🔵 第2轮: 百分位归一化评分（超额50% + 稳健夏普40% + R³10%）")
+    print("=" * 70)
 
-    print(f"\n{'='*130}")
-    print(f"📊 TOP 30 参数组合（按总收益率排序）")
-    print(f"{'='*130}")
-    h = (f"{'#':<3} {'收益%':>7} {'超额%':>7} {'回撤%':>6} {'笔':>3} "
-         f"{'夏普':>6} {'稳夏':>6} {'g_dn':>5} {'g_up':>5} {'red%':>5} {'add%':>5} "
-         f"{'ADX':>4} {'a_dn':>5} {'a_up':>5} {'a_rp':>5} {'m_dn':>5} {'m_up':>5} {'m_rp':>5} {'止盈':>5}")
-    print(h)
-    print("-" * 150)
+    all_results = compute_percentile_scores(all_results)
+    all_results.sort(key=lambda x: x["score"], reverse=True)
 
-    for i, r in enumerate(results[:30], 1):
-        print(f"{i:<3} {r['return']:>7.2f} {r['excess']:>7.2f} {r['max_dd']:>6.2f} {r['trades']:>3} "
-              f"{r['sharpe']:>6.2f} {r['robust_sharpe']:>6.2f} "
-              f"{r['pm_grid_down']:>5.2f} {r['pm_grid_up']:>5.2f} {r['pm_reduce_pct']:>5.2f} {r['pm_add_pct']:>5.2f} "
-              f"{r['pm_adx_threshold']:>4.0f} {r['pm_grid_down_agg']:>5.2f} {r['pm_grid_up_agg']:>5.2f} "
-              f"{r['pm_reduce_pct_agg']:>5.2f} {r['pm_take_profit_ratio']:>5.2f}")
+    print(f"\n  {'#':<3} {'得分':>7} {'超额%':>6} {'稳夏%':>5} "
+          f"{'超额':>7} {'稳夏':>6} {'收益%':>7} {'笔':>3}  {'k':>5} 参数(gd/gu/rp/ap)")
+    print(f"  {'─' * 100}")
+    for i, r in enumerate(all_results[:20], 1):
+        p = f"{r['pm_grid_down']:.2f}/{r['pm_grid_up']:.2f}/{r['pm_reduce_pct']:.2f}/" \
+            f"{r['pm_add_pct']:.2f}"
+        print(f"  {i:<3} {r['score']:>7.2f} {r.get('pct_excess',0):>6.0f} {r.get('pct_robust_sharpe',0):>5.0f} "
+              f"{r['excess']:>7.2f} {r['robust_sharpe']:>6.2f} {r['return']:>7.2f} "
+              f"{r['trades']:>3}  {r['pm_agg_k']:>4.2f}  {p}")
+    if len(all_results) > 20:
+        print(f"  ... (共 {len(all_results)} 组, 仅显示前20)")
 
-    # ==================== 最优输出 ====================
-    print(f"\n{'='*60}")
-    print("🏆 最优参数组合")
-    print(f"{'='*60}")
-    gd, gu, rp, ap, adx, gda, gua, rpa, tp = best_result
-    gdm = round((gda + gd) / 2, 3)
-    gum = round((gua + gu) / 2, 3)
-    rpm = round((rp + rpa) / 2, 3)
-    print(f"   pm_grid_down       = {gd:.2f}")
-    print(f"   pm_grid_up         = {gu:.2f}")
-    print(f"   pm_reduce_pct      = {rp:.2f}")
-    print(f"   pm_add_pct         = {ap:.2f}")
-    print(f"   pm_adx_threshold   = {adx:.0f}")
-    print(f"   pm_grid_down_agg   = {gda:.2f}")
-    print(f"   pm_grid_up_agg     = {gua:.2f}")
-    print(f"   pm_reduce_pct_agg  = {rpa:.2f}")
-    print(f"   pm_take_profit_ratio = {tp:.2f}")
-    print("-" * 60)
-    print(f"   买入持有收益率  = {buy_hold_return:+.2f}%")
-    print(f"   策略总收益率    = {best_return:.2f}%")
-    print(f"   超额收益       = {best_return - buy_hold_return:+.2f}%")
-    if best_stats:
-        print(f"   总交易次数     = {best_stats['总交易']}")
-        print(f"   最大回撤       = {best_stats['最大回撤 (%)']}%")
-        print(f"   最终资金       = ¥{best_stats['最终资金 (¥)']:,.2f}")
-        print(f"   夏普比率       = {best_stats['夏普比率']}")
-        print(f"   CAGR           = {best_stats['CAGR (%)']}%")
-        print(f"   稳健夏普比率   = {best_stats['稳健夏普比率']}")
-        print(f"   R立方          = {best_stats['R立方']}")
-    print(f"{'='*60}")
+    print(f"\n  得分范围: {all_results[-1]['score']:.2f} ~ {all_results[0]['score']:.2f}")
+    print(f"  k 覆盖:   {min(r['pm_agg_k'] for r in all_results):.2f} ~ {max(r['pm_agg_k'] for r in all_results):.2f}")
 
+    # ═══════════════════════════════════════════════════
+    # 第3轮: 验证 — 8种模拟行情压力测试
+    # ═══════════════════════════════════════════════════
+    print(f"\n{'=' * 70}")
+    print("🔵 第3轮: 8种模拟行情压力测试（概率加权）")
+    print(f"{'=' * 70}")
+    print(f"  对全部 {len(all_results)} 组参数在8种场景上逐一回测...")
+
+    from simulate_market_scenarios import get_last_price as sim_get_last_price
+    try:
+        last_price, last_date = sim_get_last_price()
+    except Exception:
+        from core.cache import load as cache_load
+        cached = cache_load(config0.ts_code, config0.market)
+        last_price = float(cached["Close"].iloc[-1])
+        last_date = cached["Date"].iloc[-1]
+    print(f"  最新收盘价: {last_price:.2f} HKD ({last_date})\n")
+
+    print("  生成8种模拟行情数据...")
+    scenario_dfs, scenario_benchmarks = prepare_scenario_dfs(last_price, last_date, config0, df_base)
+    print(f"  场景数据准备完成\n")
+
+    validated = []
+    n_total = len(all_results)
+    t1 = time.time()
+
+    # ── 第一遍：收集所有场景原始指标（与真实数据评分口径统一）──
+    # 存储: (idx, label, excess, robust_sharpe, return, r_cubed)
+    raw_scenario_metrics = []
+    for idx, r in enumerate(all_results):
+        params = {k: r[k] for k in r if k.startswith("pm_")}
+        for label in SCENARIO_LABEL_MAP:
+            scenario_kwargs = {**base_kwargs, "pm_start_date": last_date.strftime("%Y%m%d")}
+            config_s = BacktestConfig(**{**scenario_kwargs, **params})
+            try:
+                trades_s, equity_s, eq_dates_s = run_backtest(
+                    scenario_dfs[label].copy(), config_s)
+                stats_s = calc_stats(trades_s, config_s.initial_capital,
+                                     equity_s, eq_dates_s,
+                                     benchmark_return=scenario_benchmarks[label])
+                raw_scenario_metrics.append({
+                    "idx": idx,
+                    "label": label,
+                    "excess": stats_s["超额收益 (%)"] or 0.0,
+                    "robust_sharpe": stats_s["稳健夏普比率"] or 0.0,
+                    "r_cubed": min(stats_s["R立方"] or 0.0, 10.0),
+                    "total_return": stats_s["总收益率 (%)"],
+                })
+            except Exception:
+                raw_scenario_metrics.append({
+                    "idx": idx, "label": label,
+                    "excess": float("-inf"), "robust_sharpe": float("-inf"),
+                    "r_cubed": float("-inf"), "total_return": float("-inf"),
+                })
+
+        if (idx + 1) % 200 == 0:
+            elapsed = time.time() - t1
+            eta = (elapsed / (idx + 1)) * (n_total - idx - 1) if idx >= 0 else 0
+            print(f"   已回测: {idx + 1}/{n_total} ({elapsed:.0f}s | ETA {eta/60:.0f}min)")
+
+    # ── 第二遍：场景内每项指标百分位归一化 + 加权 + 概率汇总 ──
+    # 权重（与真实数据评分一致）
+    weights = {"excess": 0.50, "robust_sharpe": 0.40, "r_cubed": 0.10}
+    df_raw = pd.DataFrame(raw_scenario_metrics)
+    for metric in weights:
+        df_raw[f"pct_{metric}"] = np.nan
+    for label in SCENARIO_LABEL_MAP:
+        for metric in weights:
+            mask = (df_raw["label"] == label) & np.isfinite(df_raw[metric])
+            if mask.any():
+                df_raw.loc[mask, f"pct_{metric}"] = (
+                    df_raw.loc[mask, metric].rank(pct=True) * 100)
+
+    # 汇总：每个参数组合在每个场景的百分位加权分
+    scenario_scores_by_idx = {}
+    for _, row in df_raw.iterrows():
+        idx = int(row["idx"])
+        label = row["label"]
+        if idx not in scenario_scores_by_idx:
+            scenario_scores_by_idx[idx] = {}
+        # 四维加权
+        sw = sum(row.get(f"pct_{m}", 0) * w for m, w in weights.items()
+                 if np.isfinite(row.get(f"pct_{m}", float("nan"))))
+        scenario_scores_by_idx[idx][label] = round(sw, 2)
+
+    for rank, r in enumerate(all_results):
+        scores_by_label = scenario_scores_by_idx.get(rank, {})
+
+        # 概率加权汇总
+        valid_scores = []
+        valid_probs = []
+        for label in SCENARIO_LABEL_MAP:
+            s = scores_by_label.get(label, float("-inf"))
+            if np.isfinite(s):
+                valid_scores.append(s)
+                valid_probs.append(SCENARIO_PROBS[label])
+        if valid_scores:
+            total_prob = sum(valid_probs)
+            weighted_score = sum(s * p / total_prob for s, p in zip(valid_scores, valid_probs))
+        else:
+            weighted_score = 0.0
+
+        combined_score = r["score"] * 0.3 + weighted_score * 0.7
+
+        # 熊市场景收益率
+        slow_grind_ret = 0.0
+        volatile_down_ret = 0.0
+        for _, row in df_raw[df_raw["idx"] == rank].iterrows():
+            if row["label"] == "缓慢阴跌":
+                slow_grind_ret = row["total_return"]
+            elif row["label"] == "震荡向下":
+                volatile_down_ret = row["total_return"]
+        worst_bear_ret = min(slow_grind_ret, volatile_down_ret)
+        bear_crash = np.isfinite(worst_bear_ret) and worst_bear_ret < -25
+
+        entry = {
+            **r,
+            "weighted_score": round(weighted_score, 2),
+            "combined_score": round(combined_score, 2),
+            "slow_grind_ret": slow_grind_ret,
+            "volatile_down_ret": volatile_down_ret,
+            "bear_crash": bear_crash,
+        }
+        for label in SCENARIO_LABEL_MAP:
+            entry[f"sim_{label}"] = scores_by_label.get(label, float("nan"))
+        validated.append(entry)
+
+    print(f"  场景验证耗时: {(time.time()-t1)/60:.1f} 分钟")
+
+    robust_candidates = [v for v in validated if not v["bear_crash"]]
+    if len(robust_candidates) < 5:
+        print(f"  ⚠️ 熊市过滤后仅剩 {len(robust_candidates)} 组，放宽条件")
+        robust_candidates = validated
+
+    robust_candidates.sort(key=lambda x: x["combined_score"], reverse=True)
+    top10 = robust_candidates[:10]
+
+    print(f"\n  第3轮 TOP 10（真实30% + 模拟70%）:")
+    print(f"  {'#':<3} {'综合':>7} {'真实':>7} {'模拟':>7} "
+          f"{'缓跌%':>7} {'震下%':>7}  {'k':>5}  参数")
+    print(f"  {'─' * 90}")
+    for i, v in enumerate(top10, 1):
+        p = f"gd={v['pm_grid_down']:.2f} gu={v['pm_grid_up']:.2f} " \
+            f"rp={v['pm_reduce_pct']:.2f} ap={v['pm_add_pct']:.2f} " \
+            f"adx={v['pm_adx_threshold']:.0f}"
+        print(f"  {i:<3} {v['combined_score']:>7.2f} {v['score']:>7.2f} "
+              f"{v['weighted_score']:>7.2f} {v['slow_grind_ret']:>7.2f} "
+              f"{v['volatile_down_ret']:>7.2f}  {v['pm_agg_k']:>4.2f}  {p}")
+
+    # ═══════════════════════════════════════════════════
+    # 第4轮: 鲁棒 — 参数敏感性检验
+    # ═══════════════════════════════════════════════════
+    print(f"\n{'=' * 70}")
+    print("🔵 第4轮: 参数敏感性检验（±15% 扰动，k 联动所有 agg）")
+    print(f"{'=' * 70}")
+
+    # 从第3轮候选顶部开始，逐批检验直到找出 ≥3 组稳定组合
+    final_candidates = []
+    batch_size = 10
+    t2 = time.time()
+
+    for batch_start in range(0, len(robust_candidates), batch_size):
+        batch = robust_candidates[batch_start:batch_start + batch_size]
+        stable_in_batch = 0
+        print(f"\n  ── 批次 {batch_start//batch_size + 1} (第{batch_start+1}-{batch_start+len(batch)}名) ──")
+
+        for i, v in enumerate(batch, 1):
+            rank = batch_start + i
+            params = {k: v[k] for k in v if k.startswith("pm_")}
+            sens = sensitivity_test(params, base_kwargs, df_base,
+                                    benchmark_return=buy_hold_return)
+            decay = sens["decay_pct"]
+            stable = decay < 25
+
+            status = "✅ 稳定" if stable else "❌ 敏感"
+            print(f"  {rank:>3}. 基准={sens['base_score']:.2f}  扰动均值={sens['avg_perturbed']:.2f}  "
+                  f"衰减={decay:+.1f}%  {status}  "
+                  f"gd={v['pm_grid_down']:.2f} gu={v['pm_grid_up']:.2f} "
+                  f"rp={v['pm_reduce_pct']:.2f} ap={v['pm_add_pct']:.2f} "
+                  f"k={v['pm_agg_k']:.2f}")
+
+            final_candidates.append({**v, "decay_pct": decay, "stable": stable})
+            if stable:
+                stable_in_batch += 1
+
+        # 累计稳定组合数
+        total_stable = sum(1 for c in final_candidates if c["stable"])
+        print(f"  累计稳定: {total_stable} 组")
+
+        if total_stable >= 3:
+            break
+        if batch_start + batch_size >= len(robust_candidates):
+            print(f"  已遍历全部 {len(robust_candidates)} 组候选")
+            break
+
+    print(f"\n  敏感性检验耗时: {(time.time()-t2)/60:.1f} 分钟")
+
+    # 取稳定组合中综合得分最高的 3 组
+    stable_final = [c for c in final_candidates if c["stable"]]
+    if len(stable_final) < 2:
+        print(f"  ⚠️ 稳定组合不足2组（共 {len(stable_final)} 组），取衰减最小的3组")
+        final_candidates.sort(key=lambda x: x["decay_pct"])
+        stable_final = final_candidates[:3]
+    else:
+        stable_final.sort(key=lambda x: x["combined_score"], reverse=True)
+        stable_final = stable_final[:3]
+
+    # ═══════════════════════════════════════════════════
+    # 最终结果
+    # ═══════════════════════════════════════════════════
+    print(f"\n{'=' * 60}")
+    print("🏆 最终候选参数（通过全部4轮筛选）")
+    print(f"{'=' * 60}")
+
+    for i, c in enumerate(stable_final, 1):
+        gd = c['pm_grid_down']
+        gu = c['pm_grid_up']
+        rp = c['pm_reduce_pct']
+        ap = c['pm_add_pct']
+        adx = int(c['pm_adx_threshold'])
+        k = c['pm_agg_k']
+        gda, gua, rpa = c['gda'], c['gua'], c['rpa']
+        tp = c.get('pm_take_profit_ratio', 1.30)
+
+        print(f"\n  ── 候选 #{i} ──")
+        print(f"   pm_grid_down       = {gd:.2f}")
+        print(f"   pm_grid_up         = {gu:.2f}")
+        print(f"   pm_reduce_pct      = {rp:.2f}")
+        print(f"   pm_add_pct         = {ap:.2f}")
+        print(f"   pm_adx_threshold   = {adx}")
+        print(f"   pm_agg_k           = {k:.2f}")
+        print(f"   ── 派生的 agg 参数 ──")
+        print(f"   pm_grid_down_agg   = {gda:.2f}  (gd × {k:.2f})")
+        print(f"   pm_grid_up_agg     = {gua:.2f}  (gu × {k:.2f})")
+        print(f"   pm_reduce_pct_agg  = {rpa:.2f}  (rp + (1-{k:.2f})×0.5)")
+        print(f"   pm_take_profit_ratio = {tp:.2f}")
+        print(f"   ──────────────────")
+        print(f"   真实回测: 收益={c['return']:+.2f}%  超额={c['excess']:+.2f}%  "
+              f"回撤={c['max_dd']:.2f}%  R³={c['r_cubed']:.2f}  得分={c['score']:.2f}")
+        print(f"   模拟加权: 得分={c['weighted_score']:.2f}  综合={c['combined_score']:.2f}")
+        print(f"   敏感性:   衰减={c['decay_pct']:+.1f}%  "
+              f"{'✅ 稳定' if c['stable'] else '⚠️ 略敏感'}")
+
+    # ═══════════════════════════════════════════════════
     # 保存 Excel
-    import pandas as pd
-    out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "result")
+    # ═══════════════════════════════════════════════════
+    out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "result")
     os.makedirs(out_dir, exist_ok=True)
-    pd.DataFrame(results).to_excel(os.path.join(out_dir, "pm1_grid_search_results.xlsx"), index=False)
-    print(f"\n📁 完整结果: result/pm1_grid_search_results.xlsx")
+
+    pd.DataFrame(all_results).to_excel(
+        os.path.join(out_dir, "pm1_grid_search_all.xlsx"), index=False)
+
+    pd.DataFrame(validated).to_excel(
+        os.path.join(out_dir, "pm1_grid_search_validated.xlsx"), index=False)
+
+    pd.DataFrame(stable_final).to_excel(
+        os.path.join(out_dir, "pm1_grid_search_final.xlsx"), index=False)
+
+    print(f"\n📁 结果已保存:")
+    print(f"   全量:   result/pm1_grid_search_all.xlsx ({len(all_results)} 组)")
+    print(f"   验证:   result/pm1_grid_search_validated.xlsx ({len(validated)} 组)")
+    print(f"   最终:   result/pm1_grid_search_final.xlsx ({len(stable_final)} 组)")
+    print(f"\n✅ 四轮优化完成！")
 
 
 if __name__ == "__main__":

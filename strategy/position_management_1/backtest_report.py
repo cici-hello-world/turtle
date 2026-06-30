@@ -76,7 +76,7 @@ def generate_report(ts_code: str = "02015.HK"):
                 # 参数未知
                 "pm_grid_down": "-", "pm_grid_up": "-", "pm_reduce_pct": "-",
                 "pm_add_pct": "-", "pm_adx_threshold": "-",
-                "pm_grid_down_agg": "-", "pm_grid_up_agg": "-", "pm_reduce_pct_agg": "-",
+                "pm_agg_k": "-",
             }
             buy_hold = best["return"] - best["excess"]
         else:
@@ -137,12 +137,10 @@ def generate_report(ts_code: str = "02015.HK"):
         gu = best.get('pm_grid_up', 0)
         rp = best.get('pm_reduce_pct', 0)
         ap = best.get('pm_add_pct', 0)
-        gda = best.get('pm_grid_down_agg', 0)
-        gua = best.get('pm_grid_up_agg', 0)
-        rpa = best.get('pm_reduce_pct_agg', 0)
+        k = best.get('pm_agg_k', 0)
         adx = best.get('pm_adx_threshold', 0)
         print(f"    趋势: gd={gd}  gu={gu}  rp={rp}  ap={ap}")
-        print(f"    激进: gd={gda}  gu={gua}  rp={rpa}")
+        print(f"    激进倍数: k={k}")
         print(f"    ADX阈值: {adx}")
 
     # ── 二、模拟行情回测 ──
@@ -202,7 +200,7 @@ def generate_report(ts_code: str = "02015.HK"):
     print(f"  3. 最大风险: {worst_scene['label']}场景({SCENARIO_PROBS[worst_scene['label']]:.0%}概率) "
           f"可能再亏{abs(worst_scene['ret']):.1f}%")
     if best_params_available:
-        print(f"  4. 关键参数: 趋势gd={gd} gu={gu} rp={rp}, 激进rp={rpa}, ADX阈值={adx}")
+        print(f"  4. 关键参数: 趋势gd={gd} gu={gu} rp={rp}, 激进倍数k={k}, ADX阈值={adx}")
     else:
         print(f"  4. 参数: 非网格搜索最优，详见回测报告")
     print(f"  5. 风险提示: 模拟基于历史形态假设, 实际走势受基本面/情绪/政策多重影响")

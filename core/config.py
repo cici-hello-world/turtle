@@ -84,9 +84,7 @@ class BacktestConfig:
     # ========== 自适应网格参数（ADX < 25 时切换到激进参数） ==========
     pm_adaptive_grid: bool = True    # 是否启用自适应网格
     pm_adx_threshold: float = 25.0   # ADX 震荡/趋势分界线
-    pm_grid_down_agg: float = 0.05   # 震荡市买入阈值（窄于保守的 grid_down）
-    pm_grid_up_agg: float = 0.04     # 震荡市卖出门槛（窄于保守的 grid_up）
-    pm_reduce_pct_agg: float = 0.50  # 震荡市卖出比例（高于保守的 reduce_pct）
+    pm_agg_k: float = 0.6            # 震荡市激进倍数: gda=gd×k, gua=gu×k, rpa=rp+(1-k)×0.5
 
     # ========== 止盈与回本参数 ==========
     pm_take_profit_ratio: float = 1.30  # 权益超过初始×该倍数后：仓位归零时停止交易，有仓位时全仓清仓
@@ -104,20 +102,11 @@ class BacktestConfig:
     def __post_init__(self):
         today = pd.Timestamp.today()
 
-        # —— 自适应网格约束：震荡市应比趋势市更激进 ——
+        # —— 自适应网格约束：k 在合理范围内 ——
         if self.pm_adaptive_grid and self.mode == "position_management_1":
-            if self.pm_grid_down_agg > self.pm_grid_down:
-                print(f"⚠️ [配置修正] pm_grid_down_agg({self.pm_grid_down_agg}) > "
-                      f"pm_grid_down({self.pm_grid_down})，已互换。震荡市买入间距应 ≤ 趋势市")
-                self.pm_grid_down_agg, self.pm_grid_down = self.pm_grid_down, self.pm_grid_down_agg
-            if self.pm_grid_up_agg > self.pm_grid_up:
-                print(f"⚠️ [配置修正] pm_grid_up_agg({self.pm_grid_up_agg}) > "
-                      f"pm_grid_up({self.pm_grid_up})，已互换。震荡市卖出门槛应 ≤ 趋势市")
-                self.pm_grid_up_agg, self.pm_grid_up = self.pm_grid_up, self.pm_grid_up_agg
-            if self.pm_reduce_pct_agg < self.pm_reduce_pct:
-                print(f"⚠️ [配置修正] pm_reduce_pct_agg({self.pm_reduce_pct_agg}) < "
-                      f"pm_reduce_pct({self.pm_reduce_pct})，已互换。震荡市卖出比例应 ≥ 趋势市")
-                self.pm_reduce_pct_agg, self.pm_reduce_pct = self.pm_reduce_pct, self.pm_reduce_pct_agg
+            if self.pm_agg_k <= 0 or self.pm_agg_k > 1.0:
+                print(f"⚠️ [配置修正] pm_agg_k({self.pm_agg_k}) 超出 (0,1]，已重置为 0.7")
+                self.pm_agg_k = 0.7
 
         # 自动计算日期
         if not self.start_date:

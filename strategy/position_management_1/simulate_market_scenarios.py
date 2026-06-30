@@ -36,9 +36,7 @@ from core.statistics import calc_stats
 #    pm_reduce_pct      = 0.25,
 #    pm_add_pct         = 0.01,
 #    pm_adx_threshold   = 25,
-#    pm_grid_down_agg   = 0.02,
-#    pm_grid_up_agg     = 0.03,
-#    pm_reduce_pct_agg  = 0.75,
+#    pm_agg_k           = 0.5,    # gda=0.06 gua=0.015 rpa=0.50
 # )
 # 理想最优参数
 # BEST_PARAMS = dict(
@@ -47,21 +45,17 @@ from core.statistics import calc_stats
 #    pm_reduce_pct      = 0.25,
 #    pm_add_pct         = 0.01,
 #    pm_adx_threshold   = 25,
-#    pm_grid_down_agg   = 0.05,
-#    pm_grid_up_agg     = 0.02,
-#    pm_reduce_pct_agg  = 0.5,
+#    pm_agg_k           = 0.7,    # gda=0.035 gua=0.021 rpa=0.40
 #     pm_take_profit_ratio = 1.30,
 # )
 # 泡泡玛特最优参数
 BEST_PARAMS = dict(
-   pm_grid_down       = 0.03,
-   pm_grid_up         = 0.05,
-   pm_reduce_pct      = 0.25,
-   pm_add_pct         = 0.01,
-   pm_adx_threshold   = 35,
-   pm_grid_down_agg   = 0.03,
-   pm_grid_up_agg     = 0.05,
-   pm_reduce_pct_agg  = 0.25,
+   pm_grid_down       = 0.05,
+   pm_grid_up         = 0.04,
+   pm_reduce_pct      = 0.5,
+   pm_add_pct         = 0.3,
+   pm_adx_threshold   = 25,
+   pm_agg_k           = 0.6,    # gda=0.072 gua=0.042 rpa=0.45
 )
 
 # 美团最优参数
@@ -71,9 +65,7 @@ BEST_PARAMS = dict(
 #     pm_reduce_pct = 0.25,
 #     pm_add_pct = 0.03,
 #     pm_adx_threshold = 25,
-#     pm_grid_down_agg = 0.02,
-#     pm_grid_up_agg = 0.05,
-#     pm_reduce_pct_agg = 0.25,
+#     pm_agg_k = 0.6,        # gda=0.042 gua=0.030 rpa=0.45
 #     pm_take_profit_ratio = 1.30,
 # )
 
@@ -113,13 +105,13 @@ BASE_KWARGS = dict(
     stock_name="泡泡玛特",
     market="HK",
     mode="position_management_1",
-    pm_start_date="20260625",
+    pm_start_date="20260629",
     ema_slow = 0,
     ema_fast = 0,
     pm_initial_shares=2,
     initial_capital=40000,
     user_dmi= True,
-    pm_dynamic_position = True,
+    pm_dynamic_position = False,
     per_shares=200,
     data_source="akshare",
 )
@@ -169,148 +161,155 @@ def setup_cjk_font():
         print("⚠️ 字体设置失败")
 
 
-def generate_ohlcv(start_date: str, days: int, start_price: float,
-                   trend_type: str) -> pd.DataFrame:
-    """生成模拟日线 OHLCV 数据
+# ═══════════════════════════════════════════════════════════════
+# 场景目标特征 (126天总变化%, 日波动%, 涨日比%)
+# ═══════════════════════════════════════════════════════════════
+_SCENARIO_TARGET = {
+    "up":              (65.0, 1.40, 58),
+    "down":            (-40.0, 1.40, 35),
+    "volatile_up":     (21.0, 2.50, 50),
+    "volatile_down":   (-12.0, 2.60, 42),
+    "sideways":        (0.0, 1.80, 50),
+    "v_reversal":      (0.0, 1.80, 48),
+    "inv_v_reversal":  (0.0, 1.80, 52),
+    "slow_grind_down": (-20.0, 1.50, 40),
+}
 
-    每个形态用独立的 random seed，用「趋势项 + 震荡项 + 噪声」构造。
-    """
-    seed_map = {
-        "up": 42, "down": 43,
-        "volatile_up": 44, "volatile_down": 45,
-        "sideways": 46, "v_reversal": 47,
-        "inv_v_reversal": 48, "slow_grind_down": 49,
-    }
-    np.random.seed(seed_map[trend_type])
 
-    dates = pd.bdate_range(start=start_date, periods=days)
-    n = len(dates)
-    t = np.arange(n)
+def _find_best_historical_window(close: np.ndarray, target_chg: float,
+                                 target_vol: float, target_up: float,
+                                 window: int = 126, step: int = 10) -> tuple:
+    """扫描历史，找到与目标特征最相似的 window 天区间。"""
+    best_score, best = -1.0, None
+    for s in range(0, len(close) - window, step):
+        e = s + window
+        win = close[s:e]
+        rets = np.diff(win) / win[:-1]
+        chg = (win[-1] / win[0] - 1) * 100
+        vol = np.std(rets) * 100
+        up = (rets > 0).sum() / len(rets) * 100
+        score = (max(0.0, 1.0 - abs(chg - target_chg) / 50) * 0.4
+                 + max(0.0, 1.0 - abs(vol - target_vol) / 2.0) * 0.3
+                 + max(0.0, 1.0 - abs(up - target_up) / 25) * 0.3)
+        if score > best_score:
+            best_score = score
+            best = (s, e, chg, vol, up)
+    return (*best, best_score)
 
-    # ---- 各形态参数：trend(斜率), oscillation(振幅+周期), noise_std ----
-    # 校准原则（63天≈3个月）：
-    #   - 单边形态：高斜率 + 低噪声，趋势信号远大于噪声累积
-    #   - 震荡形态：低斜率 + 中等正弦振幅 + 较高噪声，摆动可见
-    #   - 噪声累积 ≈ noise_std × √63；趋势 ≈ slope × 63；确保 SNR > 2
-    if trend_type == "up":
-        trend_slope = 0.008        # 每天+0.8%，63天≈+65%
-        osc_amp, osc_period = 0.0, 60
-        noise_std = 0.012          # 累积噪声≈9.5%，SNR≈5.3
-    elif trend_type == "down":
-        trend_slope = -0.008       # 每天-0.8%，63天≈-40%
-        osc_amp, osc_period = 0.0, 60
-        noise_std = 0.012
-    elif trend_type == "volatile_up":
-        trend_slope = 0.003        # 每天+0.3%，63天≈+21%
-        osc_amp, osc_period = 0.06, 14   # ±6%振幅，约4.5个完整周期
-        noise_std = 0.016          # 累积噪声≈12.7%，SNR≈1.5（可见趋势但摆动明显）
-    elif trend_type == "volatile_down":
-        trend_slope = -0.002       # 每天-0.2%，63天≈-12%（缓跌）
-        osc_amp, osc_period = 0.08, 12   # ±8%振幅，约5个周期 → 大摆动明显区别于单边下跌
-        noise_std = 0.017          # 累积噪声≈13.5%
-    elif trend_type == "sideways":
-        trend_slope = 0.0          # 零趋势
-        osc_amp, osc_period = 0.06, 20   # ±6%箱体，约3个周期
-        noise_std = 0.014
-    elif trend_type == "v_reversal":
-        trend_slope = 0.0
-        osc_amp, osc_period = 0.0, 60
-        noise_std = 0.014          # 低噪声，让V形更干净
-    elif trend_type == "inv_v_reversal":
-        trend_slope = 0.0
-        osc_amp, osc_period = 0.0, 60
-        noise_std = 0.014
-    elif trend_type == "slow_grind_down":
-        trend_slope = -0.0035      # 每天-0.35%，63天≈-20%
-        osc_amp, osc_period = 0.03, 10   # ±3%小反弹，约6个周期
-        noise_std = 0.012          # 低噪声确保趋势方向可靠
+
+def _bootstrap_returns(close: np.ndarray, s_idx: int, e_idx: int,
+                       target_slope: float, n_days: int,
+                       rng: np.random.Generator,
+                       v_reverse: bool = False) -> np.ndarray:
+    """从历史区间提取日收益 → 打乱 → 调整均值 → 生成价格路径（从1.0起）。"""
+    hist_rets = np.diff(close[s_idx:e_idx]) / close[s_idx:e_idx - 1]
+    shuffled = rng.choice(hist_rets, size=n_days, replace=True)
+    if v_reverse:
+        # V形/倒V：后半段取反
+        half = n_days // 2
+        adjusted = np.concatenate([
+            shuffled[:half] + target_slope - np.mean(shuffled[:half]),
+            -shuffled[half:] + target_slope - np.mean(-shuffled[half:]),
+        ])
     else:
-        raise ValueError(f"未知趋势类型: {trend_type}")
+        adjusted = shuffled + target_slope - np.mean(shuffled)
+    return np.cumprod(1 + adjusted), adjusted
 
-    # ---- 构造对数日收益 ----
-    # 线性趋势 → 日增量
-    if trend_type in ("v_reversal", "inv_v_reversal"):
-        # V形/倒V：用分段二次函数构造价格路径，再反推日收益
-        if trend_type == "v_reversal":
-            # 先跌后涨，最低点在中点
-            half = n // 2
-            path = np.zeros(n)
-            path[:half] = -0.012 * np.arange(half)           # 前半跌，31天≈-37%
-            path[half:] = -0.012 * half + 0.012 * np.arange(n - half)  # 后半涨回原点
-            # 加噪声
-            noise = np.random.normal(0, noise_std, n)
-            daily_log_ret = np.zeros(n)
-            daily_log_ret[1:] = path[1:] - path[:-1]
-            daily_log_ret[0] = path[0]
-            daily_log_ret += noise
-        else:  # inv_v_reversal
-            half = n // 2
-            path = np.zeros(n)
-            path[:half] = 0.012 * np.arange(half)             # 前半涨，31天≈+45%
-            path[half:] = 0.012 * half - 0.012 * np.arange(n - half)  # 后半跌回原点
-            noise = np.random.normal(0, noise_std, n)
-            daily_log_ret = np.zeros(n)
-            daily_log_ret[1:] = path[1:] - path[:-1]
-            daily_log_ret[0] = path[0]
-            daily_log_ret += noise
-    else:
-        trend = trend_slope * t
-        oscillation = osc_amp * np.sin(2 * np.pi * t / osc_period)
 
-        daily_drift = np.zeros(n)
-        daily_drift[1:] = trend[1:] - trend[:-1]
-        daily_drift[0] = trend[0]
-
-        daily_osc = np.zeros(n)
-        daily_osc[1:] = oscillation[1:] - oscillation[:-1]
-        daily_osc[0] = oscillation[0]
-
-        noise = np.random.normal(0, noise_std, n)
-        daily_log_ret = daily_drift + daily_osc + noise
-
-    close_series = start_price * np.exp(np.cumsum(daily_log_ret))
-
-    # ---- 生成 OHLC ----
+def _wrap_ohlcv(dates: pd.DatetimeIndex, close_path: np.ndarray,
+                start_price: float, rng: np.random.Generator) -> pd.DataFrame:
+    """给定 Close 序列，生成完整 OHLCV DataFrame。"""
+    n = len(close_path)
+    prev = np.concatenate([[start_price], close_path[:-1]])
+    daily_ret = close_path / prev - 1
+    daily_vol = np.abs(daily_ret) + 0.005
     opens = np.zeros(n)
     highs = np.zeros(n)
     lows = np.zeros(n)
-    daily_volatility = np.abs(daily_log_ret) + 0.01
-
     for i in range(n):
-        prev_close = start_price if i == 0 else close_series[i - 1]
-        c = close_series[i]
-        vol = daily_volatility[i]
-
-        gap = np.random.normal(0, vol * 0.3)
-        o = prev_close * (1 + gap)
-
-        high_add = abs(np.random.normal(0, vol * 0.5))
-        low_sub = abs(np.random.normal(0, vol * 0.5))
-        h = max(o, c) + high_add
-        l = min(o, c) - low_sub
-        if l <= 0:
-            l = min(o, c) * 0.98
-
+        c = close_path[i]
+        gap = rng.normal(0, daily_vol[i] * 0.3)
+        o = prev[i] * (1 + gap)
+        spread = abs(rng.normal(0, daily_vol[i] * 0.5))
+        highs[i] = max(o, c) + spread
+        lows[i] = min(o, c) - spread
+        if lows[i] <= 0:
+            lows[i] = min(o, c) * 0.98
         opens[i] = o
-        highs[i] = h
-        lows[i] = l
-
     avg_vol = 50000
-    volumes = np.random.lognormal(np.log(avg_vol), 0.4, n).astype(int)
-    amounts = (volumes * close_series * 100 / 1000).round(2)
-
-    df = pd.DataFrame({
-        "ts_code": "02015.HK",
+    volumes = rng.lognormal(np.log(avg_vol), 0.4, n).astype(int)
+    amounts = (volumes * close_path * 100 / 1000).round(2)
+    return pd.DataFrame({
+        "ts_code": "09992.HK",
         "Date": dates,
         "Open": opens.round(2),
         "High": highs.round(2),
         "Low": lows.round(2),
-        "Close": close_series.round(2),
+        "Close": close_path.round(2),
         "Volume": volumes,
         "Amount": amounts,
         "Cash_Dividend": 0.0,
     })
+
+
+def generate_ohlcv(start_date: str, days: int, start_price: float,
+                   trend_type: str) -> pd.DataFrame:
+    """从历史真实行情中 bootstrap 生成模拟日线 OHLCV。
+
+    扫描指定标的全量历史，找到与场景特征最相似的 days 天区间，
+    提取该区间日收益分布，打乱后调整均值，生成模拟价格路径和 OHLCV。
+    """
+    from core.cache import load as cache_load
+
+    target = _SCENARIO_TARGET.get(trend_type)
+    if target is None:
+        raise ValueError(f"未知趋势类型: {trend_type}")
+    target_chg, target_vol, target_up = target
+    target_slope = (1 + target_chg / 100) ** (1 / days) - 1
+
+    # 加载历史数据
+    cached = cache_load(BASE_KWARGS.get("ts_code"), BASE_KWARGS.get("market"))
+    if cached is None or cached.empty:
+        raise ValueError("无法加载历史缓存数据")
+    close = cached["Close"].values.astype(float)
+    dates_full = pd.to_datetime(cached["Date"].values)
+
+    rng = np.random.default_rng({
+        "up": 42, "down": 43,
+        "volatile_up": 44, "volatile_down": 45,
+        "sideways": 46, "v_reversal": 47,
+        "inv_v_reversal": 48, "slow_grind_down": 49,
+    }[trend_type])
+
+    # 找最相似的历史区间
+    s_idx, e_idx, actual_chg, actual_vol, actual_up, score = \
+        _find_best_historical_window(close, target_chg, target_vol, target_up, days)
+    hist_start = dates_full[s_idx].strftime('%Y-%m-%d')
+    hist_end = dates_full[e_idx - 1].strftime('%Y-%m-%d')
+
+    # bootstrap 生成价格路径
+    is_v = trend_type in ("v_reversal", "inv_v_reversal")
+    path, daily_ret = _bootstrap_returns(close, s_idx, e_idx, target_slope, days,
+                                         rng, v_reverse=is_v)
+    # V形先跌后涨，倒V先涨后跌
+    if trend_type == "v_reversal":
+        half = days // 2
+        path[:half] = path[:half] * (1 - 0.01 * np.arange(half, 0, -1) / half)[::-1]
+    elif trend_type == "inv_v_reversal":
+        half = days // 2
+        path[half:] = path[half:] * (1 - 0.01 * np.arange(half) / half)
+
+    close_series = start_price * path
+
+    # 生成 OHLCV
+    dates = pd.bdate_range(start=start_date, periods=days)
+    df = _wrap_ohlcv(dates, close_series, start_price, rng)
     df["Date"] = pd.to_datetime(df["Date"])
+
+    sim_chg = (close_series[-1] / close_series[0] - 1) * 100
+    print(f"     📊 {trend_type}: ¥{close_series[0]:.1f}→¥{close_series[-1]:.1f} ({sim_chg:+.1f}%)  "
+          f"匹配 {hist_start}→{hist_end} ({actual_chg:+.0f}%/σ{actual_vol:.1f}% 得分{score:.2f})")
+
     return df.reset_index(drop=True)
 
 

@@ -987,9 +987,11 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
     dyn_p3 = config.pm_dyn_pos_3
     dyn_p4 = config.pm_dyn_pos_4
     adaptive_grid = config.pm_adaptive_grid   # 自适应网格开关
-    gd_agg = config.pm_grid_down_agg          # 震荡市买入阈值
-    gu_agg = config.pm_grid_up_agg            # 震荡市卖出阈值
-    rp_agg = config.pm_reduce_pct_agg         # 震荡市卖出比例
+    # 由趋势参数 + 激进倍数 k 派生震荡市参数
+    k = config.pm_agg_k
+    gd_agg = round(grid_down * k, 3)
+    gu_agg = round(grid_up * k, 3)
+    rp_agg = min(round(reduce_pct + (1 - k) * 0.5, 2), 0.95)
     take_profit = config.pm_take_profit_ratio # 止盈回本倍数
 
     pm_trades = []
@@ -1195,7 +1197,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
         elif (close <= reference_price * (1 - eff_grid_down)
               and _dmi_trend_area(row, config,"short") in ("C","D",None)):
             add_value = equity_before * add_pct
-            add_lots = math.ceil(add_value / (close * ps))
+            add_lots = math.floor(add_value / (close * ps))
             if add_lots <= 0:
                 _snap()
                 continue
