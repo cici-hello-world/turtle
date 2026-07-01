@@ -65,7 +65,7 @@ def update_one(ts_code: str, stock_name: str, market: str) -> bool:
         if datetime.now().hour < 20:
             # 晚上8点之后才拉取当前的，否则值拉取到前一天
             end_date = (datetime.today() - timedelta(days=1)).strftime("%Y%m%d")
-        if start_date >= end_date:
+        if start_date > end_date:
             print(f"  ✅ {ts_code} {stock_name}: 已是最新 ({last_date.strftime('%Y-%m-%d')})")
             return False
         print(f"  📡 {ts_code} {stock_name}: 增量 {start_date} ~ {end_date}")

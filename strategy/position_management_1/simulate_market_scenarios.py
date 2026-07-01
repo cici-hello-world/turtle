@@ -50,12 +50,13 @@ from core.statistics import calc_stats
 # )
 # 泡泡玛特最优参数
 BEST_PARAMS = dict(
-   pm_grid_down       = 0.05,
-   pm_grid_up         = 0.04,
-   pm_reduce_pct      = 0.5,
-   pm_add_pct         = 0.3,
-   pm_adx_threshold   = 25,
-   pm_agg_k           = 0.6,    # gda=0.072 gua=0.042 rpa=0.45
+    pm_grid_down=0.12,
+    pm_grid_up=0.07,
+    pm_reduce_pct=0.67,
+    pm_add_pct=0.5,
+    pm_adx_threshold=25,
+    pm_agg_k=0.8,
+    # gda=0.072 gua=0.042 rpa=0.45
 )
 
 # 美团最优参数
@@ -130,7 +131,7 @@ BASE_KWARGS = dict(
 #     per_shares=100,
 #     data_source="akshare",
 # )
-TRADING_DAYS = 126  # 约3个月交易日
+TRADING_DAYS = 252  # 约3个月交易日
 
 
 def get_last_price() -> float:
@@ -293,11 +294,15 @@ def generate_ohlcv(start_date: str, days: int, start_price: float,
                                          rng, v_reverse=is_v)
     # V形先跌后涨，倒V先涨后跌
     if trend_type == "v_reversal":
-        half = days // 2
-        path[:half] = path[:half] * (1 - 0.01 * np.arange(half, 0, -1) / half)[::-1]
+        half = len(path) // 2
+        n_first = half
+        mult = (1 - 0.01 * np.arange(n_first, 0, -1) / n_first)[::-1]
+        path[:n_first] = path[:n_first] * mult
     elif trend_type == "inv_v_reversal":
-        half = days // 2
-        path[half:] = path[half:] * (1 - 0.01 * np.arange(half) / half)
+        half = len(path) // 2
+        n_second = len(path) - half
+        mult = (1 - 0.01 * np.arange(n_second) / n_second)
+        path[half:] = path[half:] * mult
 
     close_series = start_price * path
 

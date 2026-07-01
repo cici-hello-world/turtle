@@ -67,8 +67,54 @@ def compute_percentile_scores(results: list[dict]) -> list[dict]:
     for r in results:
         score = sum(r.get(f"pct_{m}", 50) * w for m, w in weights.items())
         r["score"] = round(score, 2)
-
     return results
+
+
+def rolling_window_cv(params: dict, base_kwargs: dict, df_base: pd.DataFrame,
+                      window_bars: int = 252, step_bars: int = 63,
+                      warmup_bars: int = 126) -> float:
+    """滚动窗口交叉验证 —— 在真实数据的多个子区间上回测，取 P10 得分。
+
+    惩罚只在特定时段表现好、其他时段崩盘的参数。
+    """
+    dates = df_base["Date"].values
+    n = len(df_base)
+
+    scores = []
+    for start_idx in range(warmup_bars, n - window_bars, step_bars):
+        end_idx = start_idx + window_bars
+        warmup_start_idx = max(0, start_idx - warmup_bars)
+
+        df_window = df_base.iloc[warmup_start_idx:end_idx].copy()
+        ws = pd.Timestamp(dates[start_idx]).strftime("%Y%m%d")
+        we = pd.Timestamp(dates[end_idx - 1]).strftime("%Y%m%d")
+
+        window_kwargs = {**base_kwargs,
+                         "pm_start_date": ws,
+                         "start_date": pd.Timestamp(dates[warmup_start_idx]).strftime("%Y%m%d"),
+                         "end_date": we}
+
+        try:
+            config_w = BacktestConfig(**{**window_kwargs, **params})
+            trades, equity, eq_dates = run_backtest(df_window, config_w)
+
+            # 该窗口的买入持有基准收益
+            win_mask = df_window["Date"] >= ws
+            win_close = df_window.loc[win_mask, "Close"]
+            bm = ((win_close.iloc[-1] / win_close.iloc[0] - 1) * 100
+                  if len(win_close) >= 2 else 0.0)
+
+            stats = calc_stats(trades, config_w.initial_capital, equity, eq_dates,
+                               benchmark_return=bm)
+            scores.append(composite_score(stats))
+        except Exception:
+            scores.append(float("-inf"))
+
+    valid = [s for s in scores if s > float("-inf")]
+    if len(valid) < 3:
+        return 0.0
+    # P10: 最差的那10%窗口的得分上界 —— 低于此的窗口拖累直接反映在分数里
+    return float(np.percentile(valid, 10))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -119,8 +165,10 @@ SCENARIO_LABEL_MAP = {
 def prepare_scenario_dfs(last_price: float, last_date,
                          config0: BacktestConfig,
                          df_base: pd.DataFrame,
-                         trading_days: int = 126) -> tuple[dict, dict]:
+                         trading_days: int = 252) -> tuple[dict, dict]:
     """生成8种模拟行情数据并预计算指标。
+
+    模拟从 2025-10-01 到 last_date 的 K 线，与真实回测区间对齐。
 
     返回 (scenario_dfs, benchmark_returns)
     - scenario_dfs: {中文标签: df_with_indicators}
@@ -130,7 +178,9 @@ def prepare_scenario_dfs(last_price: float, last_date,
     from core.cache import load as cache_load
 
     cached = cache_load(config0.ts_code, config0.market)
+    # 模拟从最后真实日期之后开始，代表未来未知行情
     start = (last_date + timedelta(days=1)).strftime("%Y%m%d")
+    trading_days = 252
 
     scenario_dfs = {}
     benchmark_returns = {}
@@ -177,12 +227,76 @@ def prepare_scenario_dfs(last_price: float, last_date,
 # 第4轮: 参数敏感性检验
 # ═══════════════════════════════════════════════════════════════
 
+def _compute_combined_score(params: dict, base_kwargs: dict,
+                            df_base: pd.DataFrame,
+                            benchmark_return: float,
+                            scenario_dfs: dict | None,
+                            scenario_benchmarks: dict | None,
+                            sim_start_date: str | None) -> float:
+    """计算真实+模拟的综合得分。
+
+    综合得分 = 真实数据 composite_score × 0.3 + 模拟概率加权 composite_score × 0.7
+    若未传入模拟数据，退化为仅真实数据得分。
+    """
+    # ── 真实数据得分 ──
+    config_real = BacktestConfig(**{**base_kwargs, **params})
+    trades, equity, eq_dates = run_backtest(df_base.copy(), config_real)
+    stats_real = calc_stats(trades, config_real.initial_capital, equity, eq_dates,
+                            benchmark_return=benchmark_return)
+    real_score = composite_score(stats_real)
+
+    if not scenario_dfs:
+        return real_score
+
+    # ── 模拟行情得分（概率加权）──
+    scenario_scores = []
+    probs = []
+    for label in SCENARIO_LABEL_MAP:
+        if label not in scenario_dfs:
+            continue
+        scenario_kwargs = {**base_kwargs, "pm_start_date": sim_start_date}
+        config_s = BacktestConfig(**{**scenario_kwargs, **params})
+        try:
+            trades_s, equity_s, eq_dates_s = run_backtest(
+                scenario_dfs[label].copy(), config_s)
+            stats_s = calc_stats(trades_s, config_s.initial_capital,
+                                 equity_s, eq_dates_s,
+                                 benchmark_return=scenario_benchmarks.get(label, 0.0))
+            scenario_scores.append(composite_score(stats_s))
+            probs.append(SCENARIO_PROBS.get(label, 0.0))
+        except Exception:
+            scenario_scores.append(0.0)
+            probs.append(SCENARIO_PROBS.get(label, 0.0))
+
+    total_prob = sum(probs)
+    if total_prob > 0:
+        weighted_score = sum(s * p / total_prob for s, p in zip(scenario_scores, probs))
+    else:
+        weighted_score = 0.0
+
+    return real_score * 0.3 + weighted_score * 0.7
+
+
 def sensitivity_test(params: dict, base_kwargs: dict, df_base: pd.DataFrame,
                      benchmark_return: float = 0.0,
-                     perturb_pct: float = 0.15) -> dict:
+                     perturb_pct: float = 0.15,
+                     scenario_dfs: dict | None = None,
+                     scenario_benchmarks: dict | None = None,
+                     sim_start_date: str | None = None) -> dict:
     """对一组参数做 ±perturb_pct 扰动，评估得分稳定性。
 
+    同时在真实数据和8种模拟行情上计算扰动前后的综合得分变化。
+    综合得分 = 真实得分 × 0.3 + 模拟概率加权得分 × 0.7
+
     k 的扰动会让所有 agg 参数联动变化。
+
+    返回:
+      base_score:        基准综合得分
+      avg_perturbed:     扰动后综合得分均值
+      decay_pct:         综合得分衰减率 (%)
+      base_score_real:   基准真实数据得分（仅当同时有模拟数据时返回）
+      avg_perturbed_real:扰动后真实数据得分均值
+      decay_pct_real:    真实数据得分衰减率 (%)
     """
     perturb_params = [
         "pm_grid_down", "pm_grid_up",
@@ -190,12 +304,10 @@ def sensitivity_test(params: dict, base_kwargs: dict, df_base: pd.DataFrame,
         "pm_agg_k",
     ]
 
-    # 基准得分
-    config_base = BacktestConfig(**{**base_kwargs, **params})
-    trades, equity, eq_dates = run_backtest(df_base.copy(), config_base)
-    stats_base = calc_stats(trades, config_base.initial_capital, equity, eq_dates,
-                            benchmark_return=benchmark_return)
-    base_score = composite_score(stats_base)
+    # ── 基准综合得分 ──
+    base_score = _compute_combined_score(
+        params, base_kwargs, df_base, benchmark_return,
+        scenario_dfs, scenario_benchmarks, sim_start_date)
 
     perturbed_scores = []
     for pname in perturb_params:
@@ -213,11 +325,10 @@ def sensitivity_test(params: dict, base_kwargs: dict, df_base: pd.DataFrame,
         p_up[pname] = round(up_val, 3)
         if _constraint_ok(p_up):
             try:
-                config_up = BacktestConfig(**{**base_kwargs, **p_up})
-                t, e, ed = run_backtest(df_base.copy(), config_up)
-                s_up = calc_stats(t, config_up.initial_capital, e, ed,
-                                  benchmark_return=benchmark_return)
-                perturbed_scores.append(composite_score(s_up))
+                up_score = _compute_combined_score(
+                    p_up, base_kwargs, df_base, benchmark_return,
+                    scenario_dfs, scenario_benchmarks, sim_start_date)
+                perturbed_scores.append(up_score)
             except Exception:
                 pass
 
@@ -231,24 +342,72 @@ def sensitivity_test(params: dict, base_kwargs: dict, df_base: pd.DataFrame,
         p_down[pname] = round(down_val, 3)
         if _constraint_ok(p_down):
             try:
-                config_down = BacktestConfig(**{**base_kwargs, **p_down})
-                t, e, ed = run_backtest(df_base.copy(), config_down)
-                s_down = calc_stats(t, config_down.initial_capital, e, ed,
-                                    benchmark_return=benchmark_return)
-                perturbed_scores.append(composite_score(s_down))
+                down_score = _compute_combined_score(
+                    p_down, base_kwargs, df_base, benchmark_return,
+                    scenario_dfs, scenario_benchmarks, sim_start_date)
+                perturbed_scores.append(down_score)
             except Exception:
                 pass
 
     if not perturbed_scores:
-        return {"base_score": base_score, "avg_perturbed": base_score, "decay_pct": 0.0}
+        return {"base_score": base_score, "avg_perturbed": base_score,
+                "decay_pct": 0.0, "base_score_real": base_score,
+                "avg_perturbed_real": base_score, "decay_pct_real": 0.0}
 
     avg_perturbed = float(np.mean(perturbed_scores))
-    if base_score > 0:
-        decay_pct = (base_score - avg_perturbed) / base_score * 100
-    else:
-        decay_pct = (base_score - avg_perturbed) / max(abs(base_score), 0.01) * 100
 
-    return {"base_score": base_score, "avg_perturbed": avg_perturbed, "decay_pct": decay_pct}
+    def _calc_decay(base: float, avg: float) -> float:
+        if base > 0:
+            return (base - avg) / base * 100
+        elif abs(base) > 0.01:
+            return (base - avg) / abs(base) * 100
+        else:
+            return 0.0
+
+    decay_pct = _calc_decay(base_score, avg_perturbed)
+
+    # ── 同时计算仅真实数据的衰减（用于对比）──
+    if scenario_dfs:
+        base_real = _compute_combined_score(
+            params, base_kwargs, df_base, benchmark_return,
+            None, None, None)
+        perturbed_real = []
+        for pname in perturb_params:
+            base_val = params.get(pname)
+            if base_val is None:
+                continue
+            for direction in [1, -1]:
+                p_test = copy.deepcopy(params)
+                new_val = base_val * (1 + direction * perturb_pct)
+                if pname == "pm_reduce_pct":
+                    new_val = min(new_val, 0.95)
+                elif pname == "pm_add_pct":
+                    new_val = max(new_val, 0.005)
+                elif pname == "pm_agg_k":
+                    new_val = max(min(new_val, 1.0), 0.2)
+                p_test[pname] = round(new_val, 3)
+                if _constraint_ok(p_test):
+                    try:
+                        s = _compute_combined_score(
+                            p_test, base_kwargs, df_base, benchmark_return,
+                            None, None, None)
+                        perturbed_real.append(s)
+                    except Exception:
+                        pass
+        if perturbed_real:
+            avg_real = float(np.mean(perturbed_real))
+            decay_real = _calc_decay(base_real, avg_real)
+        else:
+            base_real, avg_real, decay_real = base_score, base_score, 0.0
+    else:
+        base_real = base_score
+        avg_real = avg_perturbed
+        decay_real = decay_pct
+
+    return {"base_score": base_score, "avg_perturbed": avg_perturbed,
+            "decay_pct": decay_pct,
+            "base_score_real": base_real, "avg_perturbed_real": avg_real,
+            "decay_pct_real": decay_real}
 
 
 def _constraint_ok(params: dict) -> bool:
@@ -477,7 +636,7 @@ def grid_search():
     # 第2轮: 排名 — 百分位归一化评分（不过滤，排名展示）
     # ═══════════════════════════════════════════════════
     print("=" * 70)
-    print("🔵 第2轮: 百分位归一化评分（超额50% + 稳健夏普40% + R³10%）")
+    print("🔵 第2a轮: 百分位归一化评分（超额50% + 稳健夏普40% + R³10%）")
     print("=" * 70)
 
     all_results = compute_percentile_scores(all_results)
@@ -497,6 +656,35 @@ def grid_search():
 
     print(f"\n  得分范围: {all_results[-1]['score']:.2f} ~ {all_results[0]['score']:.2f}")
     print(f"  k 覆盖:   {min(r['pm_agg_k'] for r in all_results):.2f} ~ {max(r['pm_agg_k'] for r in all_results):.2f}")
+
+    # ═══════════════════════════════════════════════════
+    # 第2b轮: 滚动窗口交叉验证 — 取 TOP 200，在多子区间上验证，过滤时段过拟合
+    # ═══════════════════════════════════════════════════
+    CV_TOP_N = min(200, len(all_results))
+    print(f"\n{'=' * 70}")
+    print(f"🔵 第2b轮: 滚动窗口交叉验证（TOP {CV_TOP_N} → TOP 50）")
+    print(f"{'=' * 70}")
+    print(f"  窗口: 252天 × 步长63天, 取 P10 得分 → 惩罚特定时段过拟合\n")
+
+    t_cv = time.time()
+    top_candidates = all_results[:CV_TOP_N]
+    for i, r in enumerate(top_candidates):
+        params = {k: r[k] for k in r if k.startswith("pm_")}
+        cv_score = rolling_window_cv(params, base_kwargs, df_base)
+        r["cv_score"] = round(cv_score, 2)
+
+        if (i + 1) % 50 == 0:
+            elapsed = time.time() - t_cv
+            eta = (elapsed / (i + 1)) * (len(top_candidates) - i - 1) if i > 0 else 0
+            print(f"   已评估: {i+1}/{len(top_candidates)} ({elapsed:.0f}s | ETA {eta/60:.0f}min)")
+
+    # 按 CV 得分降序，取 TOP 50 进入后续轮次
+    top_candidates.sort(key=lambda x: x.get("cv_score", 0), reverse=True)
+    all_results = top_candidates[:50]
+
+    print(f"\n  ✅ 第2轮完成: 滚动CV筛选后保留 {len(all_results)} 组")
+    print(f"  CV得分范围: {all_results[-1]['cv_score']:.2f} ~ {all_results[0]['cv_score']:.2f}")
+    print(f"  耗时: {(time.time()-t_cv)/60:.1f} 分钟\n")
 
     # ═══════════════════════════════════════════════════
     # 第3轮: 验证 — 8种模拟行情压力测试
@@ -530,7 +718,7 @@ def grid_search():
     for idx, r in enumerate(all_results):
         params = {k: r[k] for k in r if k.startswith("pm_")}
         for label in SCENARIO_LABEL_MAP:
-            scenario_kwargs = {**base_kwargs, "pm_start_date": last_date.strftime("%Y%m%d")}
+            scenario_kwargs = {**base_kwargs, "pm_start_date": (last_date + timedelta(days=1)).strftime("%Y%m%d")}
             config_s = BacktestConfig(**{**scenario_kwargs, **params})
             try:
                 trades_s, equity_s, eq_dates_s = run_backtest(
@@ -648,11 +836,15 @@ def grid_search():
               f"{v['volatile_down_ret']:>7.2f}  {v['pm_agg_k']:>4.2f}  {p}")
 
     # ═══════════════════════════════════════════════════
-    # 第4轮: 鲁棒 — 参数敏感性检验
+    # 第4轮: 鲁棒 — 参数敏感性检验（真实 + 模拟）
     # ═══════════════════════════════════════════════════
     print(f"\n{'=' * 70}")
-    print("🔵 第4轮: 参数敏感性检验（±15% 扰动，k 联动所有 agg）")
+    print("🔵 第4轮: 参数敏感性检验（±15%，真实+模拟综合衰减）")
     print(f"{'=' * 70}")
+    print(f"  同时扰动真实数据和8种模拟行情，计算综合得分衰减率")
+    print(f"  综合得分 = 真实数据得分×0.3 + 模拟概率加权得分×0.7")
+
+    sim_start = (last_date + timedelta(days=1)).strftime("%Y%m%d")
 
     # 从第3轮候选顶部开始，逐批检验直到找出 ≥3 组稳定组合
     final_candidates = []
@@ -668,18 +860,24 @@ def grid_search():
             rank = batch_start + i
             params = {k: v[k] for k in v if k.startswith("pm_")}
             sens = sensitivity_test(params, base_kwargs, df_base,
-                                    benchmark_return=buy_hold_return)
+                                    benchmark_return=buy_hold_return,
+                                    scenario_dfs=scenario_dfs,
+                                    scenario_benchmarks=scenario_benchmarks,
+                                    sim_start_date=sim_start)
             decay = sens["decay_pct"]
-            stable = decay < 25
+            decay_real = sens["decay_pct_real"]
+            stable = decay < 10
 
             status = "✅ 稳定" if stable else "❌ 敏感"
-            print(f"  {rank:>3}. 基准={sens['base_score']:.2f}  扰动均值={sens['avg_perturbed']:.2f}  "
-                  f"衰减={decay:+.1f}%  {status}  "
-                  f"gd={v['pm_grid_down']:.2f} gu={v['pm_grid_up']:.2f} "
+            print(f"  {rank:>3}. 综合基准={sens['base_score']:.2f}  扰动均值={sens['avg_perturbed']:.2f}  "
+                  f"衰减={decay:+.1f}%  "
+                  f"(真实:{decay_real:+.1f}%)  {status}")
+            print(f"       gd={v['pm_grid_down']:.2f} gu={v['pm_grid_up']:.2f} "
                   f"rp={v['pm_reduce_pct']:.2f} ap={v['pm_add_pct']:.2f} "
                   f"k={v['pm_agg_k']:.2f}")
 
-            final_candidates.append({**v, "decay_pct": decay, "stable": stable})
+            final_candidates.append({**v, "decay_pct": decay, "decay_pct_real": decay_real,
+                                     "stable": stable})
             if stable:
                 stable_in_batch += 1
 
@@ -695,14 +893,19 @@ def grid_search():
 
     print(f"\n  敏感性检验耗时: {(time.time()-t2)/60:.1f} 分钟")
 
-    # 取稳定组合中综合得分最高的 3 组
+    # 取稳定组合，加入稳定性惩罚后重新排名
     stable_final = [c for c in final_candidates if c["stable"]]
     if len(stable_final) < 2:
         print(f"  ⚠️ 稳定组合不足2组（共 {len(stable_final)} 组），取衰减最小的3组")
         final_candidates.sort(key=lambda x: x["decay_pct"])
         stable_final = final_candidates[:3]
     else:
-        stable_final.sort(key=lambda x: x["combined_score"], reverse=True)
+        # Plan A: 稳定性惩罚内嵌到评分 — 衰减超5%开始惩罚，指数递增
+        for c in stable_final:
+            penalty = max(0, c["decay_pct"] - 5) ** 1.5
+            c["stability_penalty"] = round(penalty, 2)
+            c["robust_score"] = round(c["combined_score"] - penalty, 2)
+        stable_final.sort(key=lambda x: x["robust_score"], reverse=True)
         stable_final = stable_final[:3]
 
     # ═══════════════════════════════════════════════════
@@ -736,10 +939,14 @@ def grid_search():
         print(f"   pm_take_profit_ratio = {tp:.2f}")
         print(f"   ──────────────────")
         print(f"   真实回测: 收益={c['return']:+.2f}%  超额={c['excess']:+.2f}%  "
-              f"回撤={c['max_dd']:.2f}%  R³={c['r_cubed']:.2f}  得分={c['score']:.2f}")
+              f"回撤={c['max_dd']:.2f}%  R³={c['r_cubed']:.2f}  百分位得分={c['score']:.2f}")
+        print(f"   滚动CV:   得分={c.get('cv_score', 'N/A')}")
         print(f"   模拟加权: 得分={c['weighted_score']:.2f}  综合={c['combined_score']:.2f}")
-        print(f"   敏感性:   衰减={c['decay_pct']:+.1f}%  "
+        print(f"   敏感性:   综合衰减={c['decay_pct']:+.1f}%  "
+              f"真实衰减={c.get('decay_pct_real', c['decay_pct']):+.1f}%  "
               f"{'✅ 稳定' if c['stable'] else '⚠️ 略敏感'}")
+        if c.get('stability_penalty', 0) > 0:
+            print(f"   稳定性惩罚: -{c['stability_penalty']:.2f}  →  鲁棒得分: {c['robust_score']:.2f}")
 
     # ═══════════════════════════════════════════════════
     # 保存 Excel
