@@ -274,7 +274,7 @@ if __name__ == "__main__":
         market="HK",
         mode="position_management_1",
         per_shares=200,
-        pm_start_date="20251001",
+        pm_start_date="20201211",
         start_date="20201211",
         user_dmi=True,
         pm_dynamic_position=False,
@@ -288,7 +288,7 @@ if __name__ == "__main__":
         pm_agg_k=0.8,
         pm_initial_shares=2,   # 手数（26手 = 2600股）
         initial_capital=40000,
-        data_source="akshare",
+        data_source="tushare",
     )
     # config = BacktestConfig(
     #     ts_code="02015.HK",

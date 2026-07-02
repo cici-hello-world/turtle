@@ -141,6 +141,51 @@ def _dmi_trend_area(row, config, direction: str = "") -> str:
         return None
     return _trend_area
 
+
+def _calc_effective_grid(row, config) -> tuple[float, float, float]:
+    """根据今日 DMI 状态计算有效网格 (eff_down, eff_up, eff_reduce)。
+
+    由 _run_position_management_1 和 signal_extractor 共同调用，
+    保证信号计算与回测引擎完全一致。
+
+    规则：
+      - 非多头（-DI > +DI）→ 激进窄网格（快速防守）
+      - A区 + 多头          → 原始宽网格（让利润跑）
+      - B/C区 + 多头        → 折中（适度止盈）
+      - D区 + 多头          → 激进窄网格（震荡高抛低吸）
+      - DMI 不可用          → 原始网格（默认）
+    """
+    k = config.pm_agg_k
+    grid_down = config.pm_grid_down
+    grid_up = config.pm_grid_up
+    reduce_pct = config.pm_reduce_pct
+
+    gd_agg = round(grid_down * k, 3)
+    gu_agg = round(grid_up * k, 3)
+    rp_agg = min(round(reduce_pct + (1 - k) * 0.5, 2), 0.95)
+
+    if not config.pm_adaptive_grid:
+        return grid_down, grid_up, reduce_pct
+
+    area = _dmi_trend_area(row, config)       # direction="" → 只判强度，不判方向
+    plus_di = row.get("+DI", 0)
+    minus_di = row.get("-DI", 0)
+    is_bull = plus_di > minus_di
+
+    if not is_bull:
+        return gd_agg, gu_agg, rp_agg
+    elif area == "A":
+        return grid_down, grid_up, reduce_pct
+    elif area in ("B", "C"):
+        return (round((gd_agg + grid_down) / 2, 3),
+                round((gu_agg + grid_up) / 2, 3),
+                round((rp_agg + reduce_pct) / 2, 3))
+    elif area == "D":
+        return gd_agg, gu_agg, rp_agg
+    else:
+        return grid_down, grid_up, reduce_pct
+
+
 def _calc_shares(capital: float, risk_per_trade: float, stop_dist: float,
                  per_shares: int) -> int:
     """计算入场股数（手数），基于风险资金 / 止损距离"""
@@ -986,12 +1031,6 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
     dyn_p2 = config.pm_dyn_pos_2
     dyn_p3 = config.pm_dyn_pos_3
     dyn_p4 = config.pm_dyn_pos_4
-    adaptive_grid = config.pm_adaptive_grid   # 自适应网格开关
-    # 由趋势参数 + 激进倍数 k 派生震荡市参数
-    k = config.pm_agg_k
-    gd_agg = round(grid_down * k, 3)
-    gu_agg = round(grid_up * k, 3)
-    rp_agg = min(round(reduce_pct + (1 - k) * 0.5, 2), 0.95)
     take_profit = config.pm_take_profit_ratio # 止盈回本倍数
 
     pm_trades = []
@@ -1036,42 +1075,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 continue
         equity_before = capital + current_lots * close * ps
 
-        # —— 自适应网格：_dmi_trend_area 衡量趋势强度，调用方根据 +DI>-DI 判断多空 ——
-        #
-        # —— 自适应网格：根据DMI区域 + DI方向硬切换参数 ——
-        #   A区+多头 → 趋势参数（强势上涨，坚定持股）
-        #   B/C区+多头 → 温和参数（趋势末端/震荡向上，适度止盈）
-        #   D区/空头 → 激进参数（无趋势/逆势，防守）
-        if adaptive_grid:
-            _area = _dmi_trend_area(row, config)
-            plus_di = row.get("+DI", 0)
-            minus_di = row.get("-DI", 0)
-            is_bull = plus_di > minus_di
-
-            if not is_bull:
-                eff_grid_down = gd_agg
-                eff_grid_up   = gu_agg
-                eff_reduce    = rp_agg
-            elif _area == "A":
-                eff_grid_down = grid_down
-                eff_grid_up   = grid_up
-                eff_reduce    = reduce_pct
-            elif _area in ("B", "C"):
-                eff_grid_down = round((gd_agg + grid_down) / 2, 3)
-                eff_grid_up   = round((gu_agg + grid_up) / 2, 3)
-                eff_reduce    = round((rp_agg + reduce_pct) / 2, 3)
-            elif _area == "D":
-                eff_grid_down = gd_agg
-                eff_grid_up   = gu_agg
-                eff_reduce    = rp_agg
-            else:
-                eff_grid_down = grid_down
-                eff_grid_up   = grid_up
-                eff_reduce    = reduce_pct
-        else:
-            eff_grid_down = grid_down
-            eff_grid_up   = grid_up
-            eff_reduce    = reduce_pct
+        eff_grid_down, eff_grid_up, eff_reduce = _calc_effective_grid(row, config)
 
         hh_entry = row.get("HH_Entry", np.nan)
         # DMI + 趋势自适应（含 ADXR 趋势强度确认）

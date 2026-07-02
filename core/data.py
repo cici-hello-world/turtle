@@ -1,5 +1,5 @@
 """数据获取与预处理 —— A股 / 港股统一入口"""
-
+import datetime
 import os
 import re
 import pandas as pd
@@ -31,6 +31,8 @@ def fetch_data(ts_code: str, stock_name: str, market: str,
                 print(f"📦 [缓存命中] {stock_name}  {start_date}~{end_date} → 返回 {len(result)} 条")
                 return result.reset_index(drop=True)
             else:
+                cache_end_dt = pd.to_datetime(cache_end)
+                start_date = (cache_end_dt + datetime.timedelta(days=1)).strftime("%Y%m%d")
                 print(f"📦 [缓存不足] {stock_name}  缓存 {cache_start}~{cache_end}，"
                       f"需要 {start_date}~{end_date}")
 
@@ -100,15 +102,15 @@ def fetch_data(ts_code: str, stock_name: str, market: str,
             combined = pd.concat([existing, df], ignore_index=True)
             combined = combined.drop_duplicates(subset=["Date"], keep="last")
             combined = combined.sort_values("Date").reset_index(drop=True)
-            cache_save(combined, ts_code, market)
         else:
-            cache_save(df, ts_code, market)
+            combined = df.copy()
+        cache_save(combined, ts_code, market)
         print(f"💾 [缓存已更新] {ts_code}")
     except Exception as e:
         print(f"⚠️ 缓存写入失败: {e}")
 
-    print(f"✅ 数据准备完成：共 {len(df)} 条记录")
-    return df
+    print(f"✅ 缓存新增：共 {len(df)} 条记录")
+    return combined
 
 
 def _fetch_a_share(pro, ts_code: str, start_date: str, end_date: str,
@@ -217,7 +219,7 @@ def _fetch_hk_share(pro, ts_code: str, start_date: str,
     # 1. 下载复权日线
     df = pro.hk_daily_adj(ts_code=ts_code, start_date=start_date, end_date=end_date)
     if df.empty:
-        raise ValueError("❌ 错误：未获取到日线数据")
+        return pd.DataFrame()
 
     df = df.sort_values("trade_date")
 
@@ -244,7 +246,7 @@ def _fetch_a_share_akshare(ts_code: str, start_date: str,
         start_date=start_date, end_date=end_date, adjust="",  # 不复权
     )
     if df.empty:
-        raise ValueError(f"❌ akshare 未获取到 {ts_code} A股数据")
+        return pd.DataFrame()
 
     # 映射到标准中间格式
     df = df.rename(columns={
@@ -283,7 +285,7 @@ def _fetch_hk_share_akshare(ts_code: str, start_date: str,
         start_date=start_date, end_date=end_date, adjust="",  # 不复权
     )
     if df.empty:
-        raise ValueError(f"❌ akshare 未获取到 {ts_code} 港股数据")
+        return pd.DataFrame()
 
     # 映射到标准中间格式
     df = df.rename(columns={
@@ -323,7 +325,7 @@ def _fetch_a_share_sina(ts_code: str, start_date: str,
         symbol=symbol, start_date=start_date, end_date=end_date, adjust="",
     )
     if df.empty:
-        raise ValueError(f"❌ 新浪未获取到 {ts_code} A股数据")
+        return pd.DataFrame()
 
     # 新浪返回到: date, open, high, low, close, volume (无 amount)
     df = df.rename(columns={
@@ -355,7 +357,7 @@ def _fetch_hk_share_sina(ts_code: str, start_date: str,
     print(f"  📡 调取新浪 stock_hk_daily(symbol={symbol}, 不复权) ...")
     df = ak.stock_hk_daily(symbol=symbol, adjust="")
     if df.empty:
-        raise ValueError(f"❌ 新浪未获取到 {ts_code} 港股数据")
+        return pd.DataFrame()
 
     # 新浪返回: date, open, high, low, close, volume (无 amount)
     df = df.rename(columns={
@@ -582,6 +584,13 @@ def _check_data_completeness(df: pd.DataFrame, exchange: str,
 
     if len(trading_days) != len(df):
         missing_dates = trading_days_no_tz[~trading_days_no_tz.isin(df["Date"])]
-        print(f"✅ 数据有误：缺失共 {len(trading_days) - len(df)} 条记录")
-        print("缺失的日期如下：")
-        print(missing_dates.strftime("%Y-%m-%d").tolist())
+        # 排除已知的特殊休市日（台风/暴雨等不可抗力导致的临时休市）
+        known_closed = pd.to_datetime(["2023-09-01", "2023-09-08"])
+        real_missing = missing_dates[~missing_dates.isin(known_closed)]
+        if len(real_missing) > 0:
+            print(f"✅ 数据有误：缺失共 {len(real_missing)} 条记录")
+            print("缺失的日期如下：")
+            print(real_missing.strftime("%Y-%m-%d").tolist())
+            raise ValueError("❌ 错误：数据有误")
+        else:
+            print(f"ℹ️ 仅缺失已知特殊休市日（{len(missing_dates)} 天），跳过检查")

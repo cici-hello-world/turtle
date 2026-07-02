@@ -55,7 +55,7 @@ def update_one(ts_code: str, stock_name: str, market: str) -> bool:
     last_date = last_cached_date(ts_code, market)
     if last_date is None:
         # 无缓存，全量拉取,可修改start_date和end_date
-        start_date = "20210812"
+        start_date = "20201211"
         end_date = (pd.Timestamp.today() - pd.DateOffset(years=5)).strftime("%Y%m%d")
         print(f"  🆕 {ts_code} {stock_name}: 无缓存，全量拉取")
     else:
@@ -105,7 +105,8 @@ def update_one(ts_code: str, stock_name: str, market: str) -> bool:
     return True
 
 
-def main():
+def main() -> dict[str, bool]:
+    """更新所有待更新股票的缓存，返回 {ts_code: 是否成功}"""
     target_market = None
     use_all = False
 
@@ -135,23 +136,30 @@ def main():
         for m in ["A", "HK", "ETF"]:
             cached = load(ts_code, m)
             if cached is not None and not cached.empty:
-                if (ts_code, m, ts_code) not in to_update:
+                if (ts_code, m) not in [(t[0], t[1]) for t in to_update]:
                     to_update.append((ts_code, m, ts_code))
                 break
 
     if not to_update:
         print("⚠️ 无待更新股票。请创建 stock_list.txt 或先手动拉取数据。")
-        return
+        return {}
 
     print(f"📊 待更新: {len(to_update)} 只股票\n")
 
-    updated = 0
+    results: dict[str, bool] = {}
     for ts_code, market, name in to_update:
-        if update_one(ts_code, name, market):
-            updated += 1
+        ok = update_one(ts_code, name, market)
+        results[ts_code] = ok
+        if ok:
+            print(f"  ✅ {ts_code} 更新成功")
+        else:
+            print(f"  ❌ {ts_code} 更新失败")
 
+    success = sum(1 for v in results.values() if v)
     print(f"\n{'=' * 60}")
-    print(f"✅ 完成: {updated}/{len(to_update)} 只有更新")
+    print(f"✅ 完成: {success}/{len(to_update)} 只有更新")
+
+    return results
 
 
 if __name__ == "__main__":

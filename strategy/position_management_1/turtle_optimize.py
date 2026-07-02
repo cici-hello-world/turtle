@@ -19,6 +19,12 @@ from datetime import timedelta
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib
+
+# 中文字体配置 (macOS)
+matplotlib.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'Heiti SC', 'SimHei']
+matplotlib.rcParams['axes.unicode_minus'] = False
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -49,16 +55,16 @@ BASE_KWARGS = dict(
     ema_slow=0,
     pm_initial_shares=2,
     initial_capital=40000,
-    data_source="akshare",
+    data_source="tushare",
 )
 
 # 与 grid_search_pm.py 完全一致的搜索空间
 SWEEP_RANGES = {
-    "pm_grid_down":       [0.03, 0.05, 0.07, 0.10, 0.12],
-    "pm_grid_up":         [0.03, 0.04, 0.05, 0.07, 0.10],
-    "pm_reduce_pct":      [0.25, 0.35, 0.50, 0.75],
-    "pm_add_pct":         [0.25, 0.30, 0.35, 0.40, 0.50],
-    "pm_agg_k":           [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    "pm_agg_k": [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    "pm_reduce_pct": [0.25, 0.35, 0.50, 0.75],
+    "pm_grid_up": [0.03, 0.04, 0.05, 0.07, 0.10],
+    "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+    "pm_grid_down": [0.03, 0.05, 0.07, 0.10, 0.12],
 }
 
 PARAM_LABELS = {
@@ -71,16 +77,21 @@ PARAM_LABELS = {
 
 # 默认参数（需满足 gd>gu, rp>ap 约束）
 DEFAULT_PARAMS = dict(
-    pm_grid_down=0.1,
-    pm_grid_up=0.07,
+    pm_grid_down=0.12,
+    pm_grid_up=0.1,
     pm_reduce_pct=0.75,
-    pm_add_pct=0.25,
+    pm_add_pct=0.5,
     pm_adx_threshold=25,
-    pm_agg_k=0.5,
+    pm_agg_k=0.8,
     pm_take_profit_ratio=1.30,
 )
 
-
+# 参数边界（防止生成不合法的值）
+_PARAM_BOUNDS = {
+    "pm_grid_down": (0.02, 0.20), "pm_grid_up": (0.01, 0.15),
+    "pm_reduce_pct": (0.10, 0.90), "pm_add_pct": (0.10, 0.60),
+    "pm_agg_k": (0.2, 1.0),
+}
 # ═══════════════════════════════════════════════════════════════
 # 工具函数
 # ═══════════════════════════════════════════════════════════════
@@ -91,6 +102,130 @@ def _constraint_ok(params: dict) -> bool:
     rp = params.get("pm_reduce_pct", 0)
     ap = params.get("pm_add_pct", 0)
     return gd > gu and rp > ap
+
+
+def _minmax_norm(raw: list[float]) -> list[float]:
+    """Min-max 归一化到 0-100，所有值相等时返回 50"""
+    lo, hi = min(raw), max(raw)
+    if hi - lo < 1e-12:
+        return [50.0] * len(raw)
+    return [(v - lo) / (hi - lo) * 100 for v in raw]
+
+
+def _plot_sweep_curves(sweeps: dict, out_dir: str, filename: str = "turtle_sweeps.png",
+                        title: str = "单参数扫描 — Score & 分项指标曲线"):
+    """绘制每个参数的值-vs-指标曲线（score + R³ + 稳健夏普 + 超额收益，共用归一化 y 轴）"""
+    param_names = list(sweeps.keys())
+    n = len(param_names)
+    if n == 0:
+        return
+
+    lines_cfg = [
+        ("score",         "Score (综合)",       "steelblue",  "-",  "o"),
+        ("r_cubed",       "R³",                 "darkorange", "--", "s"),
+        ("robust_sharpe", "稳健夏普",            "seagreen",   "-.", "D"),
+        ("excess",        "超额收益",            "firebrick",  ":",  "^"),
+    ]
+
+    cols = min(3, n)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 5 * rows))
+    if n == 1:
+        axes = [axes]
+    else:
+        axes = axes.flatten()
+
+    for i, pname in enumerate(param_names):
+        ax = axes[i]
+        results = sweeps[pname]
+        label = PARAM_LABELS.get(pname, pname)
+
+        # 按 value 排序
+        results_sorted = sorted(results, key=lambda r: r["value"])
+        x = [r["value"] for r in results_sorted]
+
+        for key, disp_name, color, ls, marker in lines_cfg:
+            raw = [r[key] for r in results_sorted]
+            y = _minmax_norm(raw)
+            ax.plot(x, y, color=color, linestyle=ls, marker=marker,
+                    linewidth=1.5, markersize=5, label=disp_name)
+
+        # 标注 score 最高点（score 已 min-max 归一化到 0-100）
+        best = max(results_sorted, key=lambda r: r["score"])
+        scores_norm = _minmax_norm([r["score"] for r in results_sorted])
+        best_idx = next(j for j, r in enumerate(results_sorted) if r is best)
+        ax.annotate(f"{best['value']:.3f}",
+                    xy=(best["value"], scores_norm[best_idx]),
+                    xytext=(0, -12), textcoords="offset points",
+                    fontsize=8, color="darkred", ha="center",
+                    arrowprops=dict(arrowstyle="->", color="darkred", lw=0.8))
+
+        ax.set_xlabel(label, fontsize=11)
+        ax.set_ylabel("归一化得分 (0–100)", fontsize=11)
+        ax.set_title(f"{label}", fontsize=12, fontweight="bold")
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8, loc="lower right")
+
+    for j in range(n, len(axes)):
+        axes[j].set_visible(False)
+
+    fig.suptitle(title, fontsize=14, fontweight="bold", y=1.01)
+    fig.tight_layout()
+
+    png_path = os.path.join(out_dir, filename)
+    fig.savefig(png_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"📈 参数扫描曲线已保存: {png_path}")
+
+
+def _single_round_sweep(df_base: pd.DataFrame, base_params: dict,
+                         benchmark_return: float) -> dict:
+    """以 base_params 为固定基准，对每个参数做一轮独立单参数扫描（不更新参数）。
+    返回与 part2_param_sweep 中 all_sweeps 相同结构的 dict。"""
+    sweeps = {}
+    for pname in SWEEP_RANGES:
+        label = PARAM_LABELS[pname]
+        current_val = base_params[pname]
+        lo, hi = _PARAM_BOUNDS[pname]
+        low = max(lo, current_val * 0.5)
+        high = min(hi, current_val * 1.5)
+        sweep_vals = np.round(np.linspace(low, high, 30), 3).tolist()
+        if current_val not in sweep_vals:
+            sweep_vals = sorted(set(sweep_vals + [current_val]))
+
+        batch = []
+        for val in sweep_vals:
+            params = copy.deepcopy(base_params)
+            params[pname] = val
+            stats = run_one_backtest(params, BASE_KWARGS, df_base,
+                                     benchmark_return=benchmark_return)
+            if stats:
+                stats["_sweep_val"] = val
+                batch.append(stats)
+
+        if len(batch) < 2:
+            continue
+
+        compute_percentile_scores(batch)
+
+        results = []
+        for s in batch:
+            results.append({
+                "value": s["_sweep_val"],
+                "score": s["score"],
+                "CAGR": round(s["CAGR (%)"], 2),
+                "MaxDD": round(s["最大回撤 (%)"], 2),
+                "excess": round(s["超额收益 (%)"], 2),
+                "robust_sharpe": round(s["稳健夏普比率"], 2),
+                "r_cubed": round(s["R立方"], 2),
+                "trades": s["总交易"],
+            })
+
+        sweeps[pname] = results
+        best = max(results, key=lambda x: x["score"])
+        print(f"     🏔️ {label} 峰值: {best['value']:.3f}  (得分={best['score']:.2f})")
+
+    return sweeps
 
 
 def run_one_backtest(params: dict, base_kwargs: dict, df: pd.DataFrame,
@@ -182,97 +317,96 @@ def part2_param_sweep(df_base: pd.DataFrame):
     # 使用可变副本，扫完一个参数就更新
     current_params = copy.deepcopy(DEFAULT_PARAMS)
 
-    # 参数边界（防止生成不合法的值）
-    _PARAM_BOUNDS = {
-        "pm_grid_down": (0.02, 0.20), "pm_grid_up": (0.01, 0.15),
-        "pm_reduce_pct": (0.10, 0.90), "pm_add_pct": (0.10, 0.60),
-        "pm_agg_k": (0.2, 1.0),
-    }
+    while True:
+        last_param = copy.deepcopy(current_params)
+        for pname in SWEEP_RANGES:
+            label = PARAM_LABELS[pname]
+            current_val = current_params[pname]
+            lo, hi = _PARAM_BOUNDS[pname]
+            # 从当前值向两端扩展 ±50%，生成30个候选值
+            low = max(lo, current_val * 0.5)
+            high = min(hi, current_val * 1.5)
+            print(f"{pname}:{low},{high}")
+            sweep_vals = np.round(np.linspace(low, high, 30), 3).tolist()
+            # 确保当前值在列表中
+            if current_val not in sweep_vals:
+                sweep_vals = sorted(set(sweep_vals + [current_val]))
 
-    for pname in SWEEP_RANGES:
-        label = PARAM_LABELS[pname]
-        current_val = current_params[pname]
-        lo, hi = _PARAM_BOUNDS[pname]
-        # 从当前值向两端扩展 ±50%，生成30个候选值
-        low = max(lo, current_val * 0.5)
-        high = min(hi, current_val * 1.5)
-        sweep_vals = np.round(np.linspace(low, high, 30), 3).tolist()
-        # 确保当前值在列表中
-        if current_val not in sweep_vals:
-            sweep_vals = sorted(set(sweep_vals + [current_val]))
+            pvalues = sweep_vals
+            print(f"  📐 扫描 {label}: {low:.3f}→{high:.3f} ({len(pvalues)}个值)")
+            print(f"     当前基值: " + ", ".join(f"{PARAM_LABELS.get(k, k)}={v}"
+                                                 for k, v in current_params.items() if k in SWEEP_RANGES))
 
-        pvalues = sweep_vals
-        print(f"  📐 扫描 {label}: {low:.3f}→{high:.3f} ({len(pvalues)}个值)")
-        print(f"     当前基值: " + ", ".join(f"{PARAM_LABELS.get(k,k)}={v}"
-              for k, v in current_params.items() if k in SWEEP_RANGES))
+            # 收集该参数所有值的回测统计
+            batch = []
+            for val in pvalues:
+                params = copy.deepcopy(current_params)
+                params[pname] = val
+                stats = run_one_backtest(params, BASE_KWARGS, df_base, benchmark_return=bm)
+                if stats:
+                    stats["_sweep_val"] = val
+                    batch.append(stats)
 
-        # 收集该参数所有值的回测统计
-        batch = []
-        for val in pvalues:
-            params = copy.deepcopy(current_params)
-            params[pname] = val
-            stats = run_one_backtest(params, BASE_KWARGS, df_base, benchmark_return=bm)
-            if stats:
-                stats["_sweep_val"] = val
-                batch.append(stats)
+            if len(batch) < 2:
+                print(f"     ⚠️ 有效结果不足\n")
+                continue
 
-        if len(batch) < 2:
-            print(f"     ⚠️ 有效结果不足\n")
-            continue
+            # 批量百分位归一化
+            compute_percentile_scores(batch)
 
-        # 批量百分位归一化
-        compute_percentile_scores(batch)
+            results = []
+            for s in batch:
+                results.append({
+                    "value": s["_sweep_val"],
+                    "score": s["score"],
+                    "CAGR": round(s["CAGR (%)"], 2),
+                    "MaxDD": round(s["最大回撤 (%)"], 2),
+                    "excess": round(s["超额收益 (%)"], 2),
+                    "robust_sharpe": round(s["稳健夏普比率"], 2),
+                    "r_cubed": round(s["R立方"], 2),
+                    "trades": s["总交易"],
+                })
 
-        results = []
-        for s in batch:
-            results.append({
-                "value": s["_sweep_val"],
-                "score": s["score"],
-                "CAGR": round(s["CAGR (%)"], 2),
-                "MaxDD": round(s["最大回撤 (%)"], 2),
-                "excess": round(s["超额收益 (%)"], 2),
-                "robust_sharpe": round(s["稳健夏普比率"], 2),
-                "r_cubed": round(s["R立方"], 2),
-                "trades": s["总交易"],
-            })
+            all_sweeps[pname] = results
 
-        all_sweeps[pname] = results
+            # 山峰
+            best = max(results, key=lambda x: x["score"])
+            worst = min(results, key=lambda x: x["score"])
+            print(f"     百分位得分范围: {worst['score']:.2f} ~ {best['score']:.2f}")
+            print(f"     🏔️ 峰值: {label} = {best['value']:.3f}  "
+                  f"(得分={best['score']:.2f}, CAGR={best['CAGR']:.1f}% / DD={best['MaxDD']:.1f}%)")
 
-        # 山峰
-        best = max(results, key=lambda x: x["score"])
-        worst = min(results, key=lambda x: x["score"])
-        print(f"     百分位得分范围: {worst['score']:.2f} ~ {best['score']:.2f}")
-        print(f"     🏔️ 峰值: {label} = {best['value']:.3f}  "
-              f"(得分={best['score']:.2f}, CAGR={best['CAGR']:.1f}% / DD={best['MaxDD']:.1f}%)")
+            # 更新基值
+            old_val = current_params[pname]
+            if old_val != best["value"]:
+                current_params[pname] = best["value"]
+                print(f"     📌 更新: {label} {old_val:.3f} → {best['value']:.3f}")
 
-        # 更新基值
-        old_val = current_params[pname]
-        current_params[pname] = best["value"]
-        print(f"     📌 更新: {label} {old_val:.3f} → {best['value']:.3f}")
-
-        # 峭壁检测：对每个原始指标单独检验峰值附近的波动
-        peak_val = best["value"]
-        near_peak = [s for s in batch
-                     if abs(s["_sweep_val"] - peak_val) / max(peak_val, 0.001) <= 0.25]
-        if len(near_peak) >= 2:
-            metrics = {
-                "超额收益": [s.get("excess", 0) for s in near_peak],
-                "稳健夏普": [s.get("robust_sharpe", 0) for s in near_peak],
-                "R³": [min(s.get("r_cubed", 0), 100) for s in near_peak],
-            }
-            cliff_tags = []
-            for mname, mvals in metrics.items():
-                mrange = max(mvals) - min(mvals)
-                mavg = np.mean(mvals)
-                cr = abs(mrange / max(abs(mavg), 0.01)) if abs(mavg) > 0.01 else 0
-                if cr > 0.5:
-                    cliff_tags.append(f"{mname} ⚠️{cr:.0%}")
-                elif cr > 0.25:
-                    cliff_tags.append(f"{mname} ⚡{cr:.0%}")
-                else:
-                    cliff_tags.append(f"{mname} ✓{cr:.0%}")
-            print(f"     峭壁检测: " + "  ".join(cliff_tags))
-        print()
+            # 峭壁检测：对每个原始指标单独检验峰值附近的波动
+            peak_val = best["value"]
+            near_peak = [s for s in batch
+                         if abs(s["_sweep_val"] - peak_val) / max(peak_val, 0.001) <= 0.25]
+            if len(near_peak) >= 2:
+                metrics = {
+                    "超额收益": [s.get("excess", 0) for s in near_peak],
+                    "稳健夏普": [s.get("robust_sharpe", 0) for s in near_peak],
+                    "R³": [min(s.get("r_cubed", 0), 100) for s in near_peak],
+                }
+                cliff_tags = []
+                for mname, mvals in metrics.items():
+                    mrange = max(mvals) - min(mvals)
+                    mavg = np.mean(mvals)
+                    cr = abs(mrange / max(abs(mavg), 0.01)) if abs(mavg) > 0.01 else 0
+                    if cr > 0.5:
+                        cliff_tags.append(f"{mname} ⚠️{cr:.0%}")
+                    elif cr > 0.25:
+                        cliff_tags.append(f"{mname} ⚡{cr:.0%}")
+                    else:
+                        cliff_tags.append(f"{mname} ✓{cr:.0%}")
+                print(f"     峭壁检测: " + "  ".join(cliff_tags))
+            print()
+        if current_params == last_param:
+            break
 
     # 最终串行贪心结果
     print("  ── 串行贪心最终参数 ──")
@@ -717,11 +851,9 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     if sweeps:
-        rows = []
-        for pname, results in sweeps.items():
-            for r in results:
-                rows.append({"parameter": pname, **r})
-        pd.DataFrame(rows).to_excel(os.path.join(out_dir, "turtle_sweeps.xlsx"), index=False)
+        _plot_sweep_curves(sweeps, out_dir,
+                           filename="turtle_sweeps_part2.png",
+                           title="Part 2 收敛后 — 单参数扫描")
 
     if part3_results:
         xlsx_path = os.path.join(out_dir, "turtle_rolling_sim.xlsx")
@@ -734,6 +866,23 @@ def main():
                              columns=["label", "params", "rolling_mean", "sim_weighted",
                                      "combined", "p10"]).to_excel(
                     writer, sheet_name="综合排名", index=False)
+
+        # ── Part 3 验证后：以最终最优参数为基准再做单参数扫描，与 Part 2 对比 ──
+        if part3_results.get("final"):
+            best_validated = part3_results["final"][0][1]
+            print(f"\n  📌 Part 3 验证后最优参数: "
+                  f"gd={best_validated['pm_grid_down']:.3f} "
+                  f"gu={best_validated['pm_grid_up']:.3f} "
+                  f"rp={best_validated['pm_reduce_pct']:.3f} "
+                  f"ap={best_validated['pm_add_pct']:.3f} "
+                  f"k={best_validated['pm_agg_k']:.3f}")
+
+            bm = compute_buy_hold(df_base, BASE_KWARGS["pm_start_date"])
+            final_sweeps = _single_round_sweep(df_base, best_validated, bm)
+            if final_sweeps:
+                _plot_sweep_curves(final_sweeps, out_dir,
+                                   filename="turtle_sweeps_final.png",
+                                   title="Part 3 验证后 — 单参数扫描（最终参数）")
 
     if all_stats:
         pd.DataFrame(all_stats).to_excel(
