@@ -842,7 +842,7 @@ def grid_search():
     print("🔵 第4轮: 参数敏感性检验（±15%，真实+模拟综合衰减）")
     print(f"{'=' * 70}")
     print(f"  同时扰动真实数据和8种模拟行情，计算综合得分衰减率")
-    print(f"  综合得分 = 真实数据得分×0.3 + 模拟概率加权得分×0.7")
+    print(f"  综合得分 = 真实数据得分×0.5 + 模拟概率加权得分×0.5")
 
     sim_start = (last_date + timedelta(days=1)).strftime("%Y%m%d")
 

@@ -6,6 +6,7 @@
 """
 
 from dataclasses import dataclass
+from fileinput import close
 
 import pandas as pd
 
@@ -49,6 +50,7 @@ class DailySignal:
 
     # 加仓是否被 DMI 拦截（short方向 A/B 区）
     dmi_blocked: bool
+    today_close: float
 
 
 def extract_signal(config: BacktestConfig) -> DailySignal | None:
@@ -102,6 +104,7 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
     # 4. 今日 DMI 状态（最后一行）
     today = df.iloc[-1]
     signal_date = str(today["Date"])[:10]
+    today_close=today["Close"]
 
     adx = today.get("ADX14")
     adxr = today.get("ADXR")
@@ -173,6 +176,7 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         reduce_trigger=reduce_trigger,
         reduce_lots=reduce_lots,
         dmi_blocked=dmi_blocked,
+        today_close=today_close,
     )
 
 
@@ -213,7 +217,7 @@ def format_signal(s: DailySignal) -> str:
         pos += f"  上次交易 {s.last_trade_date}"
 
     lines = [
-        f"**{s.stock_name}** {s.ts_code}",
+        f"**{s.stock_name}** {s.ts_code} --今日收盘价 {s.today_close}",
         f"  {pos}",
         f"  {dmi_detail}",
         f"  网格: 下{s.eff_grid_down*100:.1f}% 上{s.eff_grid_up*100:.1f}% ({grid_desc})",

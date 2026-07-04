@@ -31,31 +31,30 @@ from core.statistics import calc_stats
 
 # ==================== 老铺最优参数 ====================
 # BEST_PARAMS = dict(
-#    pm_grid_down       = 0.12,
-#    pm_grid_up         = 0.03,
-#    pm_reduce_pct      = 0.25,
-#    pm_add_pct         = 0.01,
-#    pm_adx_threshold   = 25,
-#    pm_agg_k           = 0.5,    # gda=0.06 gua=0.015 rpa=0.50
+#         pm_grid_down=0.09,
+#         pm_grid_up=0.09,
+#         pm_reduce_pct=0.10,
+#         pm_add_pct=0.10,
+#         pm_adx_threshold=25,
+#         pm_agg_k= 0.57,    # gda=0.06 gua=0.015 rpa=0.50
 # )
 # 理想最优参数
 # BEST_PARAMS = dict(
-#    pm_grid_down       = 0.05,
-#    pm_grid_up         = 0.03,
-#    pm_reduce_pct      = 0.25,
-#    pm_add_pct         = 0.01,
-#    pm_adx_threshold   = 25,
-#    pm_agg_k           = 0.7,    # gda=0.035 gua=0.021 rpa=0.40
+#     pm_grid_down=0.120,
+#     pm_grid_up=0.03,
+#     pm_reduce_pct=0.610,
+#     pm_add_pct=0.386,
+#     pm_adx_threshold=25,
+#     pm_agg_k           = 0.7,    # gda=0.035 gua=0.021 rpa=0.40
 #     pm_take_profit_ratio = 1.30,
 # )
 # 泡泡玛特最优参数
 BEST_PARAMS = dict(
-    pm_grid_down=0.12,
-    pm_grid_up=0.07,
-    pm_reduce_pct=0.67,
-    pm_add_pct=0.5,
-    pm_adx_threshold=25,
-    pm_agg_k=0.8,
+        pm_grid_down=0.05,
+        pm_grid_up=0.028,
+        pm_reduce_pct=0.50,
+        pm_add_pct=0.40,
+        pm_adx_threshold=35,
     # gda=0.072 gua=0.042 rpa=0.45
 )
 
@@ -76,13 +75,14 @@ BEST_PARAMS = dict(
 #     stock_name="老铺",
 #     market="HK",
 #     mode="position_management_1",
-#     pm_start_date="20260625",
+#     pm_start_date="20260629",
 #     ema_slow = 0,
 #     ema_fast = 0,
 #     pm_initial_shares=3,
 #     initial_capital=40000,
 #     user_dmi= True,
 #     pm_dynamic_position = False,
+#     pm_adaptive_grid=False,
 #     per_shares=100,
 #     data_source="akshare",
 # )
@@ -91,13 +91,14 @@ BEST_PARAMS = dict(
 #     stock_name="理想",
 #     market="HK",
 #     mode="position_management_1",
-#     pm_start_date="20260625",
+#     pm_start_date="20260629",
 #     ema_slow = 0,
 #     ema_fast = 0,
 #     pm_initial_shares=25,
 #     initial_capital=40000,
 #     user_dmi= True,
 #     pm_dynamic_position = False,
+#     pm_adaptive_grid = False,
 #     per_shares=100,
 #     data_source="akshare",
 # )
@@ -106,13 +107,14 @@ BASE_KWARGS = dict(
     stock_name="泡泡玛特",
     market="HK",
     mode="position_management_1",
-    pm_start_date="20260629",
+    pm_start_date="20260703",
     ema_slow = 0,
     ema_fast = 0,
     pm_initial_shares=2,
     initial_capital=40000,
     user_dmi= True,
     pm_dynamic_position = False,
+    pm_adaptive_grid = False,
     per_shares=200,
     data_source="akshare",
 )

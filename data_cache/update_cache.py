@@ -28,7 +28,7 @@ os.chdir(ROOT)
 
 from core.cache import load, save, list_cached, last_cached_date
 
-DATA_SOURCE = os.environ.get("TURTLE_DATA_SOURCE", "akshare")
+DATA_SOURCE = os.environ.get("TURTLE_DATA_SOURCE", "tushare")
 STOCK_LIST_FILE = os.path.join(ROOT, "stock_list.txt")
 
 
@@ -62,12 +62,12 @@ def update_one(ts_code: str, stock_name: str, market: str) -> bool:
         # 增量：从最后日期+1天开始
         start_date = (last_date + timedelta(days=1)).strftime("%Y%m%d")
         end_date = datetime.today().strftime("%Y%m%d")
-        if datetime.now().hour < 20:
+        if datetime.now().hour < 18:
             # 晚上8点之后才拉取当前的，否则值拉取到前一天
             end_date = (datetime.today() - timedelta(days=1)).strftime("%Y%m%d")
         if start_date > end_date:
             print(f"  ✅ {ts_code} {stock_name}: 已是最新 ({last_date.strftime('%Y-%m-%d')})")
-            return False
+            return True
         print(f"  📡 {ts_code} {stock_name}: 增量 {start_date} ~ {end_date}")
 
     # 重要：use_cache=False 避免递归读缓存
@@ -91,17 +91,6 @@ def update_one(ts_code: str, stock_name: str, market: str) -> bool:
         print(f"  ❌ {ts_code} 获取失败: {e}")
         return False
 
-    # 与旧缓存合并
-    existing = load(ts_code, market)
-    if existing is not None and not existing.empty:
-        combined = pd.concat([existing, new_df], ignore_index=True)
-        combined = combined.drop_duplicates(subset=["Date"], keep="last")
-        combined = combined.sort_values("Date").reset_index(drop=True)
-    else:
-        combined = new_df
-
-    save(combined, ts_code, market)
-    print(f"  💾 {ts_code}: {len(existing) if existing is not None else 0} → {len(combined)} 条")
     return True
 
 

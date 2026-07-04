@@ -10,6 +10,7 @@
 - "position_management_2":   仓位管理策略2（Swing恢复：反弹卖出、回落买回，固定手数）
 """
 
+import copy
 import math
 import numpy as np
 import pandas as pd
@@ -131,7 +132,7 @@ def _dmi_trend_area(row, config, direction: str = "") -> str:
 
         if is_bull_trend and adx_up and (trend_standard or trend_early or trend_di_strong):
             _trend_area = "A"
-        elif is_bull_trend and not adx_up and trend_standard:
+        elif is_bull_trend and not adx_up and (trend_standard or trend_early or trend_di_strong):
             _trend_area = "B"
         elif adx_up:
             _trend_area = "C"
@@ -174,8 +175,8 @@ def _calc_effective_grid(row, config) -> tuple[float, float, float]:
 
     if not is_bull:
         return gd_agg, gu_agg, rp_agg
-    elif area == "A":
-        return grid_down, grid_up, reduce_pct
+    # elif area == "A":
+    #     return grid_down, grid_up, reduce_pct
     elif area in ("B", "C"):
         return (round((gd_agg + grid_down) / 2, 3),
                 round((gu_agg + grid_up) / 2, 3),
@@ -1079,12 +1080,13 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
 
         hh_entry = row.get("HH_Entry", np.nan)
         # DMI + 趋势自适应（含 ADXR 趋势强度确认）
-        if config.pm_adaptive and close > hh_entry and _dmi_trend_area(row, config,"long") in ("A","B"):
+        if config.pm_adaptive and close > hh_entry and _dmi_trend_area(row, config,"long") == "A":
             # ---- 单边上涨趋势 → Donchian 通道：趋势跟踪，不轻易卖 ----
             # Donchian 买入：突破20日高点 + 趋势加速确认 → 加仓
-            df_donchian = df.iloc[(i-(config.entry_period+1)):]
-            config.initial_capital = capital
-            trades,eq,eq_dates =_run_long_with_pyramid(df_donchian, config,True)
+            df_donchian = df.iloc[(i - config.entry_period - 1):]
+            tmp_config = copy.deepcopy(config)
+            tmp_config.initial_capital = capital
+            trades,eq,eq_dates =_run_long_with_pyramid(df_donchian, tmp_config, True)
             if trades:
                 add_lots = trades[0].get("Shares",0)
                 total_cost = trades[0].get("Cost_¥",0)
@@ -1154,7 +1156,10 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                     "ADX_DOWN": row["ADX_DOWN"],
                     "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
                 })
-                if current_lots>0:
+                # 趋势反转出场 → 趋势已破，清空剩余网格仓位
+                # 止损出场 → 可能是假突破，保留网格仓位继续运作
+                is_trend_reversal = "Trend Reversal" in reason
+                if current_lots > 0 and is_trend_reversal:
                     #同时清仓剩余仓位
                     reduce_lots = current_lots
                     gross_proceeds = exit_price * reduce_lots * ps
@@ -1283,7 +1288,8 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             # ---- 非单边上涨趋势 → 网格交易 ----
             # 网格卖出（非自适应DMI模式：需空头强势才卖）
             if (close >= reference_price * (1 + eff_grid_up)
-                    and current_lots > 0):
+                    and current_lots > 0
+                    and _dmi_trend_area(row, config, "long") != "A"):
                 reduce_value = equity_before * eff_reduce
                 reduce_lots = math.ceil(reduce_value / (close * ps))
                 reduce_lots = min(reduce_lots, current_lots)

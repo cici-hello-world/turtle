@@ -49,7 +49,7 @@ BASE_KWARGS = dict(
     pm_start_date="20210112", #全量数据所有指标均不为空的那一天开始
     user_dmi=True,
     pm_adaptive=True,
-    pm_adaptive_grid=True,
+    pm_adaptive_grid=False,
     pm_dynamic_position=False,
     ema_fast=0,
     ema_slow=0,
@@ -57,14 +57,68 @@ BASE_KWARGS = dict(
     initial_capital=40000,
     data_source="tushare",
 )
-
+# BASE_KWARGS = dict(
+#     ts_code="02015.HK",
+#     stock_name="理想",
+#     market="HK",
+#     mode="position_management_1",
+#     per_shares=100,
+#     pm_start_date="20220913",
+#     start_date="20220813",
+#     user_dmi=True,
+#     pm_adaptive=True,
+#     pm_adaptive_grid=False,
+#     pm_dynamic_position=False,
+#     ema_fast=0,
+#     ema_slow=0,
+#     pm_initial_shares=25,
+#     initial_capital=0,
+#     data_source="akshare",
+# )
+# BASE_KWARGS = dict(
+#         ts_code="03690.HK",
+#         stock_name="美团",
+#         market="HK",
+#         mode="position_management_1",
+#         per_shares=100,
+#         pm_start_date="20181023",
+#         start_date="20180920",
+#         user_dmi=True,
+#         pm_adaptive=True,
+#         pm_adaptive_grid=False,
+#         pm_dynamic_position=False,
+#         ema_fast=0,
+#         ema_slow=0,
+#         pm_initial_shares=2,
+#         initial_capital=0,
+#         data_source="akshare",
+#     )
+# BASE_KWARGS = dict(
+#         ts_code="06181.HK",
+#         stock_name="老铺",
+#         market="HK",
+#         mode="position_management_1",
+#         per_shares=100,
+#         pm_start_date="20240729",
+#         start_date="20240628",
+#         user_dmi=True,
+#         pm_adaptive=True,
+#         pm_adaptive_grid=False,
+#         pm_dynamic_position=False,
+#         ema_fast=0,
+#         ema_slow=0,
+#         pm_initial_shares=3,
+#         initial_capital=40000,
+#         data_source="akshare",
+#     )
 # 与 grid_search_pm.py 完全一致的搜索空间
 SWEEP_RANGES = {
-    "pm_agg_k": [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-    "pm_reduce_pct": [0.25, 0.35, 0.50, 0.75],
-    "pm_grid_up": [0.03, 0.04, 0.05, 0.07, 0.10],
+     "pm_agg_k": [1.0], #0.4, 0.5, 0.6, 0.7, 0.8, 0.9,
     "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+    "pm_reduce_pct": [0.25, 0.35, 0.60, 0.75],
+    "pm_grid_up": [0.03, 0.04, 0.05, 0.07, 0.10],
     "pm_grid_down": [0.03, 0.05, 0.07, 0.10, 0.12],
+    "pm_adx_threshold": [25,30,35,40],
 }
 
 PARAM_LABELS = {
@@ -73,6 +127,12 @@ PARAM_LABELS = {
     "pm_reduce_pct":      "减仓比例 (rp)",
     "pm_add_pct":         "加仓比例 (ap)",
     "pm_agg_k":           "激进倍数 (k)",
+    "pm_adx_threshold":    "强势值(adx)"
+}
+
+# 单参数扫描步长：adx 整数步进，其余 0.01
+SWEEP_STEP = {
+    "pm_adx_threshold": 1,
 }
 
 # 默认参数（需满足 gd>gu, rp>ap 约束）
@@ -83,14 +143,13 @@ DEFAULT_PARAMS = dict(
     pm_add_pct=0.5,
     pm_adx_threshold=25,
     pm_agg_k=0.8,
-    pm_take_profit_ratio=1.30,
 )
 
 # 参数边界（防止生成不合法的值）
 _PARAM_BOUNDS = {
-    "pm_grid_down": (0.02, 0.20), "pm_grid_up": (0.01, 0.15),
-    "pm_reduce_pct": (0.10, 0.90), "pm_add_pct": (0.10, 0.60),
-    "pm_agg_k": (0.2, 1.0),
+    "pm_grid_down": (0.05, 0.35), "pm_grid_up": (0.05, 0.35),
+    "pm_reduce_pct": (0.60, 0.90), "pm_add_pct": (0.20, 0.50),
+    "pm_agg_k": (0.4, 1.0),"pm_adx_threshold":(25,55),
 }
 # ═══════════════════════════════════════════════════════════════
 # 工具函数
@@ -113,9 +172,10 @@ def _minmax_norm(raw: list[float]) -> list[float]:
 
 
 def _plot_sweep_curves(sweeps: dict, out_dir: str, filename: str = "turtle_sweeps.png",
-                        title: str = "单参数扫描 — Score & 分项指标曲线"):
+                        title: str = "单参数扫描 — Score & 分项指标曲线",
+                        base_params: dict | None = None):
     """绘制每个参数的值-vs-指标曲线（score + R³ + 稳健夏普 + 超额收益，共用归一化 y 轴）"""
-    param_names = list(sweeps.keys())
+    param_names = [k for k in sweeps.keys() if not k.startswith("_")]
     n = len(param_names)
     if n == 0:
         return
@@ -166,6 +226,28 @@ def _plot_sweep_curves(sweeps: dict, out_dir: str, filename: str = "turtle_sweep
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8, loc="lower right")
 
+        # 标注固定参数（除当前扫描参数外）
+        if base_params:
+            param_lines = []
+            for pn in ["pm_grid_down", "pm_grid_up", "pm_reduce_pct",
+                        "pm_add_pct", "pm_agg_k", "pm_adx_threshold"]:
+                plabel = PARAM_LABELS.get(pn, pn)
+                # 缩短短标签用于图内标注
+                short = plabel.split("(")[-1].rstrip(")") if "(" in plabel else plabel[-4:]
+                if pn == pname:
+                    param_lines.append(f"{short}={base_params[pn]:.3f} ←")
+                else:
+                    param_lines.append(f"{short}={base_params[pn]:.3f}")
+            # 两列排版
+            left_col = "  ".join(param_lines[:3])
+            right_col = "  ".join(param_lines[3:])
+            anno_text = f"{left_col}\n{right_col}"
+            ax.text(0.02, 0.97, anno_text, transform=ax.transAxes,
+                    fontsize=6, fontfamily="monospace", color="gray",
+                    va="top", ha="left",
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
+                              edgecolor="lightgray", alpha=0.85))
+
     for j in range(n, len(axes)):
         axes[j].set_visible(False)
 
@@ -187,21 +269,33 @@ def _single_round_sweep(df_base: pd.DataFrame, base_params: dict,
         label = PARAM_LABELS[pname]
         current_val = base_params[pname]
         lo, hi = _PARAM_BOUNDS[pname]
-        low = max(lo, current_val * 0.5)
-        high = min(hi, current_val * 1.5)
-        sweep_vals = np.round(np.linspace(low, high, 30), 3).tolist()
+        low = lo
+        high = hi
+        step = SWEEP_STEP.get(pname, 0.01)
+        sweep_vals = np.round(np.arange(low, high + step * 0.01, step), 3).tolist()
         if current_val not in sweep_vals:
             sweep_vals = sorted(set(sweep_vals + [current_val]))
-
         batch = []
+        skipped_constraint = []
+        skipped_zero_trades = []
         for val in sweep_vals:
             params = copy.deepcopy(base_params)
             params[pname] = val
+            if not _constraint_ok(params):
+                skipped_constraint.append(val)
+                continue
             stats = run_one_backtest(params, BASE_KWARGS, df_base,
                                      benchmark_return=benchmark_return)
             if stats:
                 stats["_sweep_val"] = val
                 batch.append(stats)
+            else:
+                skipped_zero_trades.append(val)
+
+        if skipped_constraint:
+            print(f"     ⛔ 约束跳过 ({label}): {skipped_constraint}")
+        if skipped_zero_trades:
+            print(f"     ⚠️ 0交易跳过 ({label}): {skipped_zero_trades}")
 
         if len(batch) < 2:
             continue
@@ -225,6 +319,7 @@ def _single_round_sweep(df_base: pd.DataFrame, base_params: dict,
         best = max(results, key=lambda x: x["score"])
         print(f"     🏔️ {label} 峰值: {best['value']:.3f}  (得分={best['score']:.2f})")
 
+    sweeps["_base_params"] = base_params
     return sweeps
 
 
@@ -287,6 +382,15 @@ def _map_stats_keys(stats: dict) -> dict:
     stats.setdefault("robust_sharpe", stats.get("稳健夏普比率", 0.0) or 0.0)
     stats.setdefault("r_cubed", stats.get("R立方", 0.0) or 0.0)
     return stats
+
+
+def _stats_from_all_stats_row(row: dict) -> dict:
+    """从 Part 1 all_stats 行中提取 compute_percentile_scores 需要的原始指标。"""
+    return {
+        "excess": row.get("excess", 0.0) or 0.0,
+        "robust_sharpe": row.get("robust_sharpe", 0.0) or 0.0,
+        "r_cubed": row.get("r_cubed", 0.0) or 0.0,
+    }
 
 
 def compute_buy_hold(df: pd.DataFrame, start_date: str) -> float:
@@ -445,7 +549,8 @@ def part2_param_sweep(df_base: pd.DataFrame):
 
 def part3_rolling_sim(df_base: pd.DataFrame,
                       greedy_params: dict | None = None,
-                      second_best_candidates: list | None = None):
+                      second_best_candidates: list | None = None,
+                      part1_all_stats: list | None = None):
     """Part 3: 滚动窗口检验 + 模拟数据样本外。
 
     样本内：9个月窗口 × 20天步长，评估参数跨时段稳定性。
@@ -453,6 +558,7 @@ def part3_rolling_sim(df_base: pd.DataFrame,
     候选参数 = 贪心最优 + Part 2 峰值两侧第二优参数。
 
     评分：滚动窗口和模拟数据统一做跨组百分位归一化。
+    综合得分 = Part1全量得分 × 1/3 + 滚动均分 × 1/3 + 模拟加权 × 1/3。
     P10 仅用于稳定性参考，不参与综合得分。
     """
     print("\n" + "=" * 70)
@@ -483,7 +589,7 @@ def part3_rolling_sim(df_base: pd.DataFrame,
     unique = []
     for label, p in candidates:
         key = (p["pm_grid_down"], p["pm_grid_up"], p["pm_reduce_pct"],
-               p["pm_add_pct"], p["pm_agg_k"])
+               p["pm_add_pct"], p["pm_agg_k"],p["pm_adx_threshold"])
         if key not in seen:
             seen.add(key)
             unique.append((label, p))
@@ -493,6 +599,60 @@ def part3_rolling_sim(df_base: pd.DataFrame,
     if not candidates:
         print("  ⚠️ 无候选参数\n")
         return None
+
+    # ── Part 1 全量得分：取原始指标，在候选之间重新跨组归一化 ──
+    # Part 1 内部的百分位得分不能直接用（基准组不同），需要取出 R³/超额/夏普
+    # 原始值，在当前候选之间重新跑 compute_percentile_scores。
+    part1_scores = {}
+    if part1_all_stats:
+        # 构建精确匹配查找表：参数6元组 → 原始指标
+        p1_lookup = {}
+        for r in part1_all_stats:
+            key = (r.get("pm_grid_down"), r.get("pm_grid_up"),
+                   r.get("pm_reduce_pct"), r.get("pm_add_pct"),
+                   r.get("pm_agg_k"), r.get("pm_adx_threshold", 25))
+            p1_lookup[key] = _stats_from_all_stats_row(r)
+
+        # 收集每个候选的 Part 1 原始指标
+        cand_p1_stats = []
+        cand_p1_labels = []
+        for label, params in candidates:
+            key = (params["pm_grid_down"], params["pm_grid_up"],
+                   params["pm_reduce_pct"], params["pm_add_pct"],
+                   params["pm_agg_k"], params.get("pm_adx_threshold", 25))
+            if key in p1_lookup:
+                row = dict(p1_lookup[key])
+                row["_cand_label"] = label
+                cand_p1_stats.append(row)
+                cand_p1_labels.append(label)
+            else:
+                # 参数不在 Part 1 网格中（如 adx 被 Part 2 优化为其他值），
+                # 单独跑一次全量回测取原始指标
+                bm = compute_buy_hold(df_base, BASE_KWARGS["pm_start_date"])
+                stats = run_one_backtest(params, BASE_KWARGS, df_base, benchmark_return=bm)
+                if stats:
+                    row = {
+                        "excess": stats.get("excess", 0.0) or 0.0,
+                        "robust_sharpe": stats.get("robust_sharpe", 0.0) or 0.0,
+                        "r_cubed": stats.get("r_cubed", 0.0) or 0.0,
+                        "_cand_label": label,
+                    }
+                    cand_p1_stats.append(row)
+                    cand_p1_labels.append(label)
+
+        # 在候选之间重新跨组百分位归一化
+        if len(cand_p1_stats) >= 3:
+            compute_percentile_scores(cand_p1_stats)
+            for s in cand_p1_stats:
+                part1_scores[s["_cand_label"]] = s["score"]
+        elif len(cand_p1_stats) > 0:
+            for s in cand_p1_stats:
+                part1_scores[s["_cand_label"]] = 50.0
+
+    # 没有 Part 1 数据的候选给中性分
+    for label, _ in candidates:
+        if label not in part1_scores:
+            part1_scores[label] = 50.0
 
     # ── 样本内：滚动窗口评估 ──
     print("  ═══ 样本内：滚动窗口评估 ═══")
@@ -551,7 +711,7 @@ def part3_rolling_sim(df_base: pd.DataFrame,
             avg = np.mean(scores)
             p_str = f"gd={params['pm_grid_down']:.2f} gu={params['pm_grid_up']:.2f} " \
                     f"rp={params['pm_reduce_pct']:.2f} ap={params['pm_add_pct']:.2f} " \
-                    f"k={params['pm_agg_k']:.2f}"
+                    f"k={params['pm_agg_k']:.2f} adx={params['pm_adx_threshold']:.2f}"
             stable = "✅ 稳定" if p10 > p10_threshold else "⚠️ 偏弱"
             print(f"  {label:<14} {p_str:<45} {n_win:>4} {avg:>6.1f} {p10:>6.1f} {stable}")
         else:
@@ -686,31 +846,32 @@ def part3_rolling_sim(df_base: pd.DataFrame,
         print(f" {sim_weighted.get(label, 0):>7.1f}")
 
     # ── 汇总排名 ──
-    # 综合得分 = 滚动均值(百分位) × 0.5 + 模拟加权(百分位) × 0.5
+    # 综合得分 = Part1全量得分 × 1/3 + 滚动均值(百分位) × 1/3 + 模拟加权(百分位) × 1/3
     # P10 仅作稳定性参考，不参与公式
     print(f"\n  ═══ 综合排名 ═══")
-    print(f"  {'候选':<14} {'滚动均分':>8} {'模拟加权':>8} {'综合':>8} {'P10':>8} {'稳定性'}")
-    print(f"  {'─' * 60}")
+    print(f"  {'候选':<14} {'Part1得分':>8} {'滚动均分':>8} {'模拟加权':>8} {'综合':>8} {'P10':>8} {'稳定性'}")
+    print(f"  {'─' * 72}")
     final = []
     for label, params in candidates:
+        p1 = part1_scores.get(label, 50.0)
         r_mean = rolling_scores.get(label, 0)
         sw = sim_weighted.get(label, 50.0)
-        combined = r_mean * 0.5 + sw * 0.5
+        combined = p1 * (1/3.0) + r_mean * (1/3.0) + sw * (1/3.0)
         sc = candidate_window_scores.get(label, [])
         p10 = np.percentile(sc, 10) if len(sc) >= 10 else 0.0
         stable = "✅" if p10 > p10_threshold else "⚠️"
-        final.append((label, params, r_mean, sw, combined, p10))
-        print(f"  {label:<14} {r_mean:>8.1f} {sw:>8.1f} {combined:>8.1f} {p10:>8.1f} {stable}")
+        final.append((label, params, p1, r_mean, sw, combined, p10))
+        print(f"  {label:<14} {p1:>8.1f} {r_mean:>8.1f} {sw:>8.1f} {combined:>8.1f} {p10:>8.1f} {stable}")
 
-    final.sort(key=lambda x: x[4], reverse=True)
-    print(f"\n  🏆 最优: {final[0][0]} (综合={final[0][4]:.1f})")
+    final.sort(key=lambda x: x[5], reverse=True)
+    print(f"\n  🏆 最优: {final[0][0]} (综合={final[0][5]:.1f})")
     print(f"     gd={final[0][1]['pm_grid_down']:.2f} gu={final[0][1]['pm_grid_up']:.2f} "
           f"rp={final[0][1]['pm_reduce_pct']:.2f} ap={final[0][1]['pm_add_pct']:.2f} "
-          f"k={final[0][1]['pm_agg_k']:.2f}")
+          f"k={final[0][1]['pm_agg_k']:.2f} adx={final[0][1]['pm_adx_threshold']:.2f}")
 
     print()
     return {"candidate_scores": candidate_window_scores, "sim_weighted": sim_weighted,
-            "final": final, "window_details": window_details}
+            "part1_scores": part1_scores, "final": final, "window_details": window_details}
 
 
 
@@ -843,7 +1004,8 @@ def main():
     sweeps, greedy_params, second_best = part2_param_sweep(df_base)
 
     # Part 3: 滚动窗口 + 模拟数据
-    part3_results = part3_rolling_sim(df_base, greedy_params, second_best)
+    part3_results = part3_rolling_sim(df_base, greedy_params, second_best,
+                                       part1_all_stats=all_stats)
 
     # 保存
     out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
@@ -853,7 +1015,8 @@ def main():
     if sweeps:
         _plot_sweep_curves(sweeps, out_dir,
                            filename="turtle_sweeps_part2.png",
-                           title="Part 2 收敛后 — 单参数扫描")
+                           title="Part 2 收敛后 — 单参数扫描",
+                           base_params=sweeps.get("_base_params"))
 
     if part3_results:
         xlsx_path = os.path.join(out_dir, "turtle_rolling_sim.xlsx")
@@ -863,26 +1026,26 @@ def main():
                     writer, sheet_name="每窗口明细", index=False)
             if part3_results.get("final"):
                 pd.DataFrame(part3_results["final"],
-                             columns=["label", "params", "rolling_mean", "sim_weighted",
-                                     "combined", "p10"]).to_excel(
+                             columns=["label", "params", "part1_score", "rolling_mean",
+                                     "sim_weighted", "combined", "p10"]).to_excel(
                     writer, sheet_name="综合排名", index=False)
 
-        # ── Part 3 验证后：以最终最优参数为基准再做单参数扫描，与 Part 2 对比 ──
+        # ── Part 3 验证后：对综合排名 top 3 分别做单参数扫描 ──
         if part3_results.get("final"):
-            best_validated = part3_results["final"][0][1]
-            print(f"\n  📌 Part 3 验证后最优参数: "
-                  f"gd={best_validated['pm_grid_down']:.3f} "
-                  f"gu={best_validated['pm_grid_up']:.3f} "
-                  f"rp={best_validated['pm_reduce_pct']:.3f} "
-                  f"ap={best_validated['pm_add_pct']:.3f} "
-                  f"k={best_validated['pm_agg_k']:.3f}")
-
             bm = compute_buy_hold(df_base, BASE_KWARGS["pm_start_date"])
-            final_sweeps = _single_round_sweep(df_base, best_validated, bm)
-            if final_sweeps:
-                _plot_sweep_curves(final_sweeps, out_dir,
-                                   filename="turtle_sweeps_final.png",
-                                   title="Part 3 验证后 — 单参数扫描（最终参数）")
+            top3 = part3_results["final"][:3]
+            for rank, (label, params, p1, r_mean, sw, combined, p10) in enumerate(top3, 1):
+                print(f"\n  🔬 Top{rank} 单参数扫描: {label} "
+                      f"(gd={params['pm_grid_down']:.3f} gu={params['pm_grid_up']:.3f} "
+                      f"rp={params['pm_reduce_pct']:.3f} ap={params['pm_add_pct']:.3f} "
+                      f"k={params['pm_agg_k']:.3f})")
+                sweeps = _single_round_sweep(df_base, params, bm)
+                if sweeps:
+                    safe_label = label.replace("/", "_").replace(" ", "_")
+                    _plot_sweep_curves(sweeps, out_dir,
+                                       filename=f"turtle_sweeps_top{rank}_{safe_label}.png",
+                                       title=f"Top{rank} 单参数扫描 — {label} (综合={combined:.1f})",
+                                       base_params=sweeps.get("_base_params"))
 
     if all_stats:
         pd.DataFrame(all_stats).to_excel(
