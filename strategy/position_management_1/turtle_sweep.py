@@ -9,7 +9,9 @@ import copy
 import os
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
+import multiprocessing
 
 import numpy as np
 import pandas as pd
@@ -20,7 +22,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from core.config import BacktestConfig
 from core.data import fetch_data
 from core.indicators import compute_indicators
-from core.scoring import score_pipeline
+from core.scoring import score_pipeline, AbsoluteScorer
 
 # ── 复用 ──
 from strategy.position_management_1.turtle_optimize import (
@@ -28,44 +30,132 @@ from strategy.position_management_1.turtle_optimize import (
     _plot_sweep_curves, _minmax_norm, PARAM_LABELS,
 )
 from strategy.position_management_1.grid_search_pm import (
-    prepare_scenario_dfs, SCENARIO_LABEL_MAP, SCENARIO_PROBS,
+    prepare_scenario_dfs, SCENARIO_LABEL_MAP, get_scenario_probs,
 )
 from strategy.position_management_1.simulate_market_scenarios import (
     get_last_price as sim_get_last_price,
 )
 
 # ═══════════════════════════════════════════════════════════════
-# 配置
+# 配置 — key 为 ts_code，通过 init_config(ts_code) 激活
 # ═══════════════════════════════════════════════════════════════
 
-BASE_KWARGS = dict(
-    ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
-    mode="position_management_1", per_shares=200,
-    start_date="20201211", pm_start_date="20210112",
-    user_dmi=True, pm_adaptive=True,
-    pm_adaptive_grid=False, pm_dynamic_position=False,
-    ema_fast=0, ema_slow=0, pm_initial_shares=2,
-    initial_capital=40000, pm_agg_k=1.0, pm_take_profit_ratio=1.30,
-    data_source="tushare",
-)
+_ALL_BASE_KWARGS = {
+    "09992.HK": dict(  # 泡泡玛特
+        ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
+        mode="position_management_1", per_shares=200,
+        start_date="20201211", pm_start_date="20210112",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=2, initial_capital=40000, pm_agg_k=1.0,
+        data_source="tushare",
+    ),
+    "03690.HK": dict(  # 美团
+        ts_code="03690.HK", stock_name="美团", market="HK",
+        mode="position_management_1", per_shares=100,
+        pm_start_date="20181023", start_date="20180920",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=2, initial_capital=40000,
+        data_source="akshare",
+    ),
+    "02015.HK": dict(  # 理想
+        ts_code="02015.HK", stock_name="理想", market="HK",
+        mode="position_management_1", per_shares=100,
+        pm_start_date="20220913", start_date="20220813",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=25, initial_capital=40000,
+        data_source="akshare",
+    ),
+}
 
-# 最优参数（来自 turtle_scoring.py 综合排名第一）
-OPTIMAL_PARAMS = dict(
-    pm_grid_down=0.05, pm_grid_up=0.028, pm_reduce_pct=0.50,
-    pm_add_pct=0.40, pm_adx_threshold=35,
-    pm_agg_k=1.0,  # 屏蔽（_plot_sweep_curves 需要此key）
-)
+_ALL_OPTIMAL_PARAMS = {
+    "09992.HK": dict(  # 泡泡玛特
+        pm_grid_down=0.105, pm_grid_up=0.075, pm_reduce_pct=0.570,
+        pm_add_pct=0.45, pm_adx_threshold=21,
+        pm_agg_k=0.66,
+    ),
+    "03690.HK": dict(  # 美团
+        pm_grid_down=0.10, pm_grid_up=0.036, pm_reduce_pct=0.53,
+        pm_add_pct=0.51, pm_adx_threshold=35, pm_agg_k=1,
+    ),
+    "02015.HK": dict(  # 理想
+        pm_grid_down=0.12, pm_grid_up=0.03, pm_reduce_pct=0.60,
+        pm_add_pct=0.30, pm_adx_threshold=35, pm_agg_k=1,
+    ),
+}
 
-# 固定熵权（来自 turtle_scoring.py 输出，不再每次重新计算）
-# 运行 turtle_scoring.py 后，将打印的权重填入此处
-SCORING_WEIGHTS = dict(
-    excess=0.50, robust_sharpe=0.40, r_cubed=0.10,
-)
+# 运行时激活的配置（由 init_config 设置）
+BASE_KWARGS = None
+OPTIMAL_PARAMS = None
+
+
+def init_config(ts_code: str):
+    """根据 ts_code 激活对应的 BASE_KWARGS 和 OPTIMAL_PARAMS。"""
+    global BASE_KWARGS, OPTIMAL_PARAMS
+    if ts_code not in _ALL_BASE_KWARGS:
+        raise KeyError(f"未配置 {ts_code} 的 BASE_KWARGS，请在 _ALL_BASE_KWARGS 中添加")
+    if ts_code not in _ALL_OPTIMAL_PARAMS:
+        raise KeyError(f"未配置 {ts_code} 的 OPTIMAL_PARAMS，请在 _ALL_OPTIMAL_PARAMS 中添加")
+    BASE_KWARGS = _ALL_BASE_KWARGS[ts_code]
+    OPTIMAL_PARAMS = _ALL_OPTIMAL_PARAMS[ts_code]
+
+# 绝对评分配置 — key 为 ts_code，通过 get_scorer(ts_code) 获取
+SCORING_CONFIG = {
+    "02015.HK": dict(  # 理想
+        weights=dict(excess=0.5423, robust_sharpe=0.2356, r_cubed=0.2221),
+        scoring_params=dict(
+            excess=dict(type="linear_quantile", slope=3.468, intercept=-58.804),
+            robust_sharpe=dict(type="linear_quantile", slope=257.143, intercept=100.143),
+            r_cubed=dict(type="linear_quantile", slope=94.637, intercept=95.946),
+        ),
+    ),
+    "09992.HK": dict(  # 泡泡玛特
+        weights=dict(excess=0.4201, robust_sharpe=0.2188, r_cubed=0.3611),
+        scoring_params=dict(
+            excess=dict(type="linear_quantile", slope=0.2491, intercept=32.9825),
+            robust_sharpe=dict(type="linear_quantile", slope=75.5985, intercept=-2.5598),
+            r_cubed=dict(type="linear_quantile", slope=22.6358, intercept=1.9102),
+        ),
+    ),
+    "03690.HK": dict(  # 美团
+        weights=dict(excess=0.361, robust_sharpe=0.207, r_cubed=0.4319),
+        scoring_params=dict(
+            excess=dict(type="linear_quantile", slope=0.52, intercept=25.24),
+            robust_sharpe=dict(type="linear_quantile", slope=94.64, intercept=5.95),
+            r_cubed=dict(type="linear_quantile", slope=52.31, intercept=5.52),
+        ),
+    ),
+    "01810.HK": dict(  # 小米
+        weights=dict(excess=0.3461, robust_sharpe=0.3455, r_cubed=0.3084),
+        scoring_params=dict(
+            excess=dict(type="linear_quantile", slope=0.5386, intercept=37.3214),
+            robust_sharpe=dict(type="linear_quantile", slope=132.3529, intercept=5.0),
+            r_cubed=dict(type="linear_quantile", slope=187.1102, intercept=3.2225),
+        ),
+    ),
+    "06181.HK": dict(  # 老铺
+        weights=dict(excess=0.2767, robust_sharpe=0.2209, r_cubed=0.5024),
+        scoring_params=dict(
+            excess=dict(type="linear_quantile", slope=3.4391, intercept=1396.1655),
+            robust_sharpe=dict(type="linear_quantile", slope=90.9091, intercept=5.0),
+            r_cubed=dict(type="linear_quantile", slope=0.1763, intercept=5.0),
+        ),
+    ),
+}
+
+
+def get_scorer(ts_code: str) -> AbsoluteScorer:
+    """获取指定标的的绝对评分器。"""
+    if ts_code not in SCORING_CONFIG:
+        raise KeyError(f"未配置 {ts_code} 的评分配置，请在 SCORING_CONFIG 中添加")
+    return AbsoluteScorer(SCORING_CONFIG[ts_code])
 
 # 单参数扫描定义（围绕最优值展开）
 SWEEP_DEFS = {
     "pm_grid_down": {
-        "values": [0.04,0.045, 0.05,0.055, 0.06,0.065,0.07,0.075, 0.08,0.085,0.09,0.095,0.10,0.105,0.11,0.115,0.12],
+        "values": [0.04,0.045, 0.05,0.055, 0.06,0.065,0.07,0.075, 0.08,0.085,0.09,0.095,0.1,0.105,0.11,0.115,0.12,0.13,0.14,0.15],
         "label": PARAM_LABELS.get("pm_grid_down", "pm_grid_down"),
     },
     "pm_grid_up": {
@@ -73,23 +163,30 @@ SWEEP_DEFS = {
         "label": PARAM_LABELS.get("pm_grid_up", "pm_grid_up"),
     },
     "pm_reduce_pct": {
-        "values": [0.45,0.46,0.47,0.48,0.49,0.50,0.51,0.52,0.53,0.54,0.55,0.56,0.57,0.58,0.59, 0.60,0.61,0.62,0.63,0.64,0.65,0.66,0.67,0.68,0.69,0.70,0.71,0.72,0.73,0.74,0.75],
+        "values": [0.31,0.32,0.33,0.34, 0.35,0.36,0.37,0.38,0.39, 0.4,0.45,0.46,0.47,0.48,0.49,0.50,0.51,0.52,0.53,0.54,0.55,0.56,0.57,0.58,0.59, 0.60,0.61,0.62,0.63,0.64,0.65,0.66,0.67,0.68,0.69,0.70,0.71,0.72,0.73,0.74,0.75,0.76,0.77,0.78,0.79,0.80],
         "label": PARAM_LABELS.get("pm_reduce_pct", "pm_reduce_pct"),
     },
     "pm_add_pct": {
-        "values": [0.20,0.21,0.22,0.23,0.24,0.25,0.26,0.27,0.28,0.29,0.30,0.31,0.32,0.33,0.34,0.35,0.36,0.37,0.38,0.39,0.40,0.41,0.42,0.43,0.44,0.45,0.50,0.55],
+        "values": [0.20,0.21,0.22,0.23,0.24,0.25,0.26,0.27,0.28,0.29,0.30,0.31,0.32,0.33,0.34,0.35,0.36,0.37,0.38,0.39,0.40,0.41,0.42,0.43,0.44,0.45,0.046,0.047,0.048,0.049,0.50,0.51,0.52,0.53,0.54,0.55],
         "label": PARAM_LABELS.get("pm_add_pct", "pm_add_pct"),
     },
     "pm_adx_threshold": {
-        "values": [20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45],
+        "values": [15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45],
         "label": PARAM_LABELS.get("pm_adx_threshold", "pm_adx_threshold"),
     },
+    "pm_agg_k":{
+        "values": [0.60,0.61,0.62,0.63,0.64,0.65,0.66,0.67,0.68,0.69,0.70,0.71,0.72,0.73,0.74,0.75,0.76,0.77,0.78,0.79,0.80,0.81,0.82,0.83,0.84,0.85,0.86,0.87,0.88,0.89,0.90,0.91,0.92,0.93,0.94,0.95,0.96,0.97,0.98,0.99,1.0],
+        "label": PARAM_LABELS.get("pm_agg_k", "pm_agg_k"),
+    }
 }
 
 # 滚动窗口参数
 WINDOW_BARS = 252
 STEP_BARS = 20
 WARMUP = 60
+
+# 并行工作进程数
+WORKERS = max(1, multiprocessing.cpu_count() - 1)
 
 # ═══════════════════════════════════════════════════════════════
 # 工具函数
@@ -107,30 +204,49 @@ def _compute_buy_hold(df: pd.DataFrame, start_date: str) -> float:
     return round((close.iloc[-1] / close.iloc[0] - 1) * 100, 2)
 
 
-def _run_three_windows(param_combos: list[dict], base_kwargs: dict,
-                       df_base: pd.DataFrame, scenario_dfs: dict,
-                       scenario_benchmarks: dict, sim_start: str,
-                       full_bm: float) -> list[dict]:
-    """对一组参数组合运行三类窗口回测，返回原始结果列表。"""
-    all_results = []
-    dates = pd.to_datetime(df_base["Date"])
-    n = len(df_base)
-    n_windows = max(0, (n - WARMUP - WINDOW_BARS) // STEP_BARS + 1)
+def _split_batches(items: list, n_batches: int) -> list[list]:
+    """将列表分割为 n_batches 个大致均匀的子列表。"""
+    if n_batches <= 1 or len(items) <= n_batches:
+        return [items]
+    k, m = divmod(len(items), n_batches)
+    batches = []
+    start = 0
+    for i in range(n_batches):
+        end = start + k + (1 if i < m else 0)
+        if end > start:
+            batches.append(items[start:end])
+        start = end
+    return batches
 
-    # Stage A: 全量历史
-    for params in param_combos:
-        stats = run_one_backtest(params, base_kwargs, df_base, benchmark_return=full_bm)
+
+# ═══════════════════════════════════════════════════════════════
+# 多进程 Worker 函数（模块级别，确保可 pickle）
+# ═══════════════════════════════════════════════════════════════
+
+def _worker_stage_a(args):
+    """Stage A worker: 全量历史回测一批参数。"""
+    params_batch, base_kwargs, df, benchmark_return = args
+    results = []
+    for params in params_batch:
+        stats = run_one_backtest(params, base_kwargs, df, benchmark_return)
         if stats:
             stats["_window"] = "full"
             stats["_params"] = params
-            all_results.append(stats)
+            results.append(stats)
+    return results
 
-    # Stage B: 滚动窗口
-    for params in param_combos:
-        for start_idx in range(WARMUP, n - WINDOW_BARS, STEP_BARS):
-            end_idx = start_idx + WINDOW_BARS
-            warmup_start = max(0, start_idx - WARMUP)
-            df_win = df_base.iloc[warmup_start:end_idx].copy()
+
+def _worker_stage_b(args):
+    """Stage B worker: 滚动窗口回测一批参数。"""
+    params_batch, base_kwargs, df, warmup, window_bars, step_bars = args
+    results = []
+    dates = pd.to_datetime(df["Date"])
+    n = len(df)
+    for params in params_batch:
+        for start_idx in range(warmup, n - window_bars, step_bars):
+            end_idx = start_idx + window_bars
+            warmup_start = max(0, start_idx - warmup)
+            df_win = df.iloc[warmup_start:end_idx]
             ws = pd.Timestamp(dates.iloc[start_idx]).strftime("%Y%m%d")
 
             win_mask = df_win["Date"] >= ws
@@ -143,21 +259,110 @@ def _run_three_windows(param_combos: list[dict], base_kwargs: dict,
             if stats and stats.get("总交易", 0) > 0:
                 stats["_window"] = f"rolling_{ws}"
                 stats["_params"] = params
-                all_results.append(stats)
+                results.append(stats)
+    return results
 
-    # Stage C: 8场景模拟
-    for params in param_combos:
-        for sc_label in SCENARIO_LABEL_MAP:
+
+def _worker_stage_c(args):
+    """Stage C worker: 8种场景模拟回测一批参数。"""
+    params_batch, base_kwargs, scenario_dfs, scenario_benchmarks, sim_start = args
+    results = []
+    for params in params_batch:
+        for sc_label, sc_df in scenario_dfs.items():
             sc_kwargs = {**base_kwargs, "pm_start_date": sim_start}
-            stats = run_one_backtest(params, sc_kwargs,
-                                     scenario_dfs[sc_label],
+            stats = run_one_backtest(params, sc_kwargs, sc_df,
                                      benchmark_return=scenario_benchmarks[sc_label])
             if stats and stats.get("总交易", 0) > 0:
                 stats["_window"] = f"sim_{sc_label}"
                 stats["_params"] = params
-                all_results.append(stats)
+                results.append(stats)
+    return results
+
+
+def _run_three_windows(param_combos: list[dict], base_kwargs: dict,
+                       df_base: pd.DataFrame, scenario_dfs: dict,
+                       scenario_benchmarks: dict, sim_start: str,
+                       full_bm: float) -> list[dict]:
+    """对一组参数组合运行三类窗口回测（多进程并行），返回原始结果列表。"""
+    all_results = []
+    n_workers = min(WORKERS, len(param_combos)) if param_combos else 1
+
+    # Stage A: 全量历史
+    batches = _split_batches(param_combos, n_workers)
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = [executor.submit(_worker_stage_a,
+                                   (batch, base_kwargs, df_base, full_bm))
+                   for batch in batches]
+        for future in as_completed(futures):
+            all_results.extend(future.result())
+
+    # Stage B: 滚动窗口
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = [executor.submit(_worker_stage_b,
+                                   (batch, base_kwargs, df_base,
+                                    WARMUP, WINDOW_BARS, STEP_BARS))
+                   for batch in batches]
+        for future in as_completed(futures):
+            all_results.extend(future.result())
+
+    # Stage C: 8场景模拟
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = [executor.submit(_worker_stage_c,
+                                   (batch, base_kwargs, scenario_dfs,
+                                    scenario_benchmarks, sim_start))
+                   for batch in batches]
+        for future in as_completed(futures):
+            all_results.extend(future.result())
 
     return all_results
+
+
+def _debug_cross_check(all_results: list[dict], sweep_param: str,
+                       optimal_params: dict):
+    """打印 OPTIMAL_PARAMS 组合的详细得分分解，用于跨参数扫描对比。"""
+    # 找到与 OPTIMAL_PARAMS 完全匹配的组合
+    target_key = tuple(optimal_params.get(p) for p in SWEEP_DEFS)
+    for r in all_results:
+        r_key = tuple(r["_params"].get(p) for p in SWEEP_DEFS)
+        if r_key == target_key:
+            break
+    else:
+        return  # 当前扫描中未测试此组合
+
+    # 收集该组合的所有窗口结果
+    from collections import defaultdict
+    group = [r for r in all_results
+             if tuple(r["_params"].get(p) for p in SWEEP_DEFS) == target_key]
+
+    full_r = next((r for r in group if r["_window"] == "full"), None)
+    rolling_rs = [r for r in group if r["_window"].startswith("rolling_")]
+    sim_rs = [r for r in group if r["_window"].startswith("sim_")]
+
+    full_score = full_r["score"] if full_r else 0
+    rolling_median = float(np.median([r["score"] for r in rolling_rs])) if rolling_rs else 0
+    sim_weighted = 0.0
+    sim_probs_total = 0.0
+    probs_cfg = get_scenario_probs(BASE_KWARGS["ts_code"])
+    for r in sim_rs:
+        sc_label = r["_window"].replace("sim_", "")
+        prob = probs_cfg.get(sc_label, 0.0)
+        if prob > 0:
+            sim_weighted += r["score"] * prob
+            sim_probs_total += prob
+    sim_weighted = sim_weighted / sim_probs_total if sim_probs_total > 0 else 0
+    combined = 0.5 * rolling_median + 0.3 * sim_weighted + 0.2 * full_score
+
+    print(f"  🔍 [DEBUG cross-check] sweep={sweep_param} "
+          f"params=({','.join(f'{PARAM_LABELS.get(p,p)}={optimal_params.get(p)}' for p in SWEEP_DEFS)})")
+    print(f"     full_score={full_score:.2f}  "
+          f"rolling_median={rolling_median:.2f} (n={len(rolling_rs)})  "
+          f"sim_weighted={sim_weighted:.2f} (n={len(sim_rs)})")
+    print(f"     combined = 0.5×{rolling_median:.2f} + 0.3×{sim_weighted:.2f} + 0.2×{full_score:.2f} = {combined:.2f}")
+    if full_r:
+        print(f"     raw: excess={full_r.get('excess',0):.2f}  "
+              f"robust_sharpe={full_r.get('robust_sharpe',0):.2f}  "
+              f"r_cubed={full_r.get('r_cubed',0):.2f}  "
+              f"trades={full_r.get('总交易',0)}")
 
 
 def _aggregate_sweep(all_results: list[dict], sweep_param: str) -> list[dict]:
@@ -185,10 +390,11 @@ def _aggregate_sweep(all_results: list[dict], sweep_param: str) -> list[dict]:
             rolling_p10 = rolling_median
 
         sim_scores, sim_probs = [], []
+        probs_cfg = get_scenario_probs(BASE_KWARGS["ts_code"])
         for r in group:
             if r["_window"].startswith("sim_"):
                 sc_label = r["_window"].replace("sim_", "")
-                prob = SCENARIO_PROBS.get(sc_label, 0.0)
+                prob = probs_cfg.get(sc_label, 0.0)
                 if prob > 0:
                     sim_scores.append(r["score"] * prob)
                     sim_probs.append(prob)
@@ -338,15 +544,27 @@ def main():
                 scenario_dfs, scenario_benchmarks, sim_start, full_bm)
             print(f"  回测完成: {len(raw_results)} 条, 耗时 {(time.time()-t0)/60:.1f}min")
 
-            # 评分管线
+            # 绝对评分（固定尺度，不依赖同批次其他组合）
             t0 = time.time()
-            scored_results, weights = score_pipeline(raw_results, fixed_weights=SCORING_WEIGHTS)
-            print(f"  评分完成: 固定权重 { {k:round(v,3) for k,v in weights.items()} }")
+            raw_results = [r for r in raw_results if r.get("总交易", 0) > 0]
+            for r in raw_results:
+                r.setdefault("excess", r.get("超额收益 (%)", 0.0) or 0.0)
+                r.setdefault("robust_sharpe", r.get("稳健夏普比率", 0.0) or 0.0)
+                r.setdefault("r_cubed", r.get("R立方", 0.0) or 0.0)
+            scorer = get_scorer(BASE_KWARGS["ts_code"])
+            scorer.score_batch(raw_results)
+            scored_results = raw_results
+            weights = scorer.weights
+            print(f"  绝对评分完成: { {k:round(v,3) for k,v in weights.items()} }")
 
             # 汇总
             summary = _aggregate_sweep(scored_results, pname)
+
+            # ── debug: 打印 OPTIMAL_PARAMS 交叉组合的详细得分分解 ──
+            # _debug_cross_check(scored_results, pname, OPTIMAL_PARAMS)
+
             for s in summary:
-                print(f"    {label}={s['value']:.3f} → 综合={s['score']:.1f}  "
+                print(f"    {label}={s['value']:.3f} → 综合={s['score']:.2f}  "
                       f"超额={s['excess']:+.1f}% 稳夏={s['robust_sharpe']:.2f}  "
                       f"R³={s['r_cubed']:.2f} 回撤={s['MaxDD']:.1f}%")
 
@@ -362,17 +580,17 @@ def main():
             old_val = OPTIMAL_PARAMS[pname]
 
             # 找到当前参数值对应的评分
-            old_entry = next((s for s in summary if abs(s["value"] - old_val) < 0.0005), None)
-            old_score = old_entry["score"] if old_entry else best_score
-
-            if abs(best_val - old_val) > 0.001 and (best_score - old_score) > 0.1:
-                print(f"  🔄 {pname} 最优值改变: {old_val:.3f}(得分{old_score:.1f}) → "
-                      f"{best_val:.3f}(得分{best_score:.1f})")
+            old_entry = next(s for s in summary if s["value"] == old_val)
+            old_score = old_entry["score"]
+            print(f"  ✅ {pname} 最优值: {best_val:.3f} (得分{best_score:.2f}),上一轮最优值: {old_val:.3f}(得分{old_score:.2f}) ")
+            if abs(best_val - old_val) > 0.001 and round(best_score - old_score, 2) > 0.02:
+                print(f"  🔄 {pname} 最优值改变: {old_val:.3f}(得分{old_score:.2f}) → "
+                      f"{best_val:.3f}(得分{best_score:.2f})")
                 OPTIMAL_PARAMS[pname] = round(best_val, 3)
                 param_changed = True
                 break  # 停止本轮扫描，用新参数重新开始
             else:
-                print(f"  ✅ {pname} 最优值未变: {best_val:.3f} (得分{best_score:.1f})")
+                print(f"  ✅ {pname} 最优值未变: {old_val:.3f} (得分{old_score:.2f})")
 
         # ── 收敛判断 ──
         if not param_changed:
@@ -414,4 +632,18 @@ def main():
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="海龟策略单参数扫描")
+    parser.add_argument("--ts-code", type=str, default="09992.HK",
+                        help=f"股票代码 (默认: 09992.HK)")
+    parser.add_argument("--workers", type=int, default=WORKERS,
+                        help=f"并行工作进程数 (默认: {WORKERS})")
+    parser.add_argument("--serial", action="store_true",
+                        help="强制串行执行（不使用多进程）")
+    args = parser.parse_args()
+    if args.serial:
+        WORKERS = 1
+    else:
+        WORKERS = max(1, args.workers)
+    init_config(args.ts_code)
     main()

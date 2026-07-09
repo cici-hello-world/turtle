@@ -111,11 +111,12 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
     plus_di = today.get("+DI")
     minus_di = today.get("-DI")
     adx_up = bool(today.get("ADX_UP", False))
-    dmi_area = _dmi_trend_area(today, config) or "-"
+    dmi_bl = df.attrs.get("dmi_baseline")  # 个股 DMI 基线
+    dmi_area = _dmi_trend_area(today, config, baseline=dmi_bl) or "-"
     is_bull = (plus_di or 0) > (minus_di or 0)
 
     # 5. 有效网格
-    eff_down, eff_up, eff_reduce = _calc_effective_grid(today, config)
+    eff_down, eff_up, eff_reduce = _calc_effective_grid(today, config, dmi_bl)
 
     # 6. 持仓状态
     if trades:
@@ -150,7 +151,7 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         )
 
     # 9. DMI 加仓拦截：short方向 A/B 区 = 强下跌趋势，不放行加仓
-    area_short = _dmi_trend_area(today, config, "short")
+    area_short = _dmi_trend_area(today, config, "short", dmi_bl)
     dmi_blocked = area_short in ("A", "B")
 
     return DailySignal(

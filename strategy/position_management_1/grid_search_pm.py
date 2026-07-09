@@ -138,17 +138,41 @@ def derive_agg(gd, gu, rp, k):
 # 第3轮: 场景验证 — 预生成场景数据
 # ═══════════════════════════════════════════════════════════════
 
-# 场景概率 (来自 scenario_analysis.py 宏观估算)
+# 场景概率 — key 为 ts_code，通过 get_scenario_probs(ts_code) 获取
 SCENARIO_PROBS = {
-    "缓慢阴跌": 0.35,
-    "震荡向下": 0.20,
-    "横盘震荡": 0.15,
-    "V形反转":  0.10,
-    "震荡向上": 0.10,
-    "单边下跌": 0.05,
-    "倒V反转":  0.03,
-    "单边上涨": 0.02,
+    "09992.HK": {  # 泡泡玛特
+        "缓慢阴跌": 0.26, "震荡向下": 0.51, "横盘震荡": 0.02,
+        "V形反转":  0.12, "震荡向上": 0.02, "单边下跌": 0.05,
+        "倒V反转":  0.01, "单边上涨": 0.01,
+    },
+    "01810.HK": {  # 小米
+        "缓慢阴跌": 0.21, "震荡向下": 0.42, "横盘震荡": 0.02,
+        "V形反转":  0.18, "震荡向上": 0.02, "单边下跌": 0.14,
+        "倒V反转":  0.01, "单边上涨": 0.01,
+    },
+    "06181.HK": {  # 老铺
+        "缓慢阴跌": 0.09, "震荡向下": 0.66, "横盘震荡": 0.02,
+        "V形反转":  0.16, "震荡向上": 0.02, "单边下跌": 0.03,
+        "倒V反转":  0.02, "单边上涨": 0.01,
+    },
+    "03690.HK": {  # 美团
+        "缓慢阴跌": 0.14, "震荡向下": 0.60, "横盘震荡": 0.03,
+        "V形反转":  0.12, "震荡向上": 0.01, "单边下跌": 0.09,
+        "倒V反转":  0.01, "单边上涨": 0.01,
+    },
+    "02015.HK": {  # 理想
+        "缓慢阴跌": 0.14, "震荡向下": 0.61, "横盘震荡": 0.01,
+        "V形反转":  0.12, "震荡向上": 0.01, "单边下跌": 0.09,
+        "倒V反转":  0.01, "单边上涨": 0.01,
+    },
 }
+
+
+def get_scenario_probs(ts_code: str) -> dict:
+    """获取指定标的的场景概率配置。"""
+    if ts_code not in SCENARIO_PROBS:
+        raise KeyError(f"未配置 {ts_code} 的场景概率，请在 SCENARIO_PROBS 中添加")
+    return SCENARIO_PROBS[ts_code]
 
 SCENARIO_LABEL_MAP = {
     "单边上涨":     "up",
@@ -185,7 +209,8 @@ def prepare_scenario_dfs(last_price: float, last_date,
     scenario_dfs = {}
     benchmark_returns = {}
     for label, trend_type in SCENARIO_LABEL_MAP.items():
-        df_sim = generate_ohlcv(start, trading_days, last_price, trend_type)
+        df_sim = generate_ohlcv(start, trading_days, last_price, trend_type,
+                                ts_code=config0.ts_code, market=config0.market)
 
         sim_start = df_sim["Date"].min()
         if cached is not None and not cached.empty:
@@ -263,10 +288,10 @@ def _compute_combined_score(params: dict, base_kwargs: dict,
                                  equity_s, eq_dates_s,
                                  benchmark_return=scenario_benchmarks.get(label, 0.0))
             scenario_scores.append(composite_score(stats_s))
-            probs.append(SCENARIO_PROBS.get(label, 0.0))
+            probs.append(get_scenario_probs(base_kwargs["ts_code"]).get(label, 0.0))
         except Exception:
             scenario_scores.append(0.0)
-            probs.append(SCENARIO_PROBS.get(label, 0.0))
+            probs.append(get_scenario_probs(base_kwargs["ts_code"]).get(label, 0.0))
 
     total_prob = sum(probs)
     if total_prob > 0:
@@ -781,7 +806,7 @@ def grid_search():
             s = scores_by_label.get(label, float("-inf"))
             if np.isfinite(s):
                 valid_scores.append(s)
-                valid_probs.append(SCENARIO_PROBS[label])
+                valid_probs.append(get_scenario_probs(config0.ts_code)[label])
         if valid_scores:
             total_prob = sum(valid_probs)
             weighted_score = sum(s * p / total_prob for s, p in zip(valid_scores, valid_probs))

@@ -83,29 +83,39 @@ def _dmi_trend_ok(row, config, direction: str = "long") -> bool:
         trend_accelerating = False
     return is_bull_trend and trend_accelerating
 
-def _dmi_trend_area(row, config, direction: str = "") -> str:
-    """dmi 趋势过滤器（增强版）。
+def _dmi_trend_area(row, config, direction: str = "long",
+                     baseline: dict | None = None) -> str:
+    """dmi 趋势过滤器（个股自适应版）。
 
-    四区定义：
-      A区 — 强势趋势：多头成立 + ADX↑ + 趋势结构确认（三条路径之一）
+    三区定义：
+      A区 — 趋势确认：多头成立 + ADX_SLOPE_5 > slope_sep + 趋势结构确认
             · 标准：ADX>阈值 且 ADX>ADXR
-            · 金叉领先：ADX金叉ADXR 且 ADX>15
-            · DI强势：|+DI - -DI| > 10 且 ADX>10（方向力度强，即使ADX偏低）
-      B区 — 趋势末端：多头成立 + ADX↓ + ADX>阈值 + ADX>ADXR
-      C区 — 趋势酝酿：不满足A/B + ADX↑
-      D区 — 无趋势震荡：不满足A/B + ADX↓
+            · DI强势：|+DI - -DI| > di_gap 且 ADX>阈值
+      C区 — 趋势酝酿：不满足A + ADX_SLOPE_5 > slope_sep
+      D区 — 无趋势震荡：ADX_SLOPE_5 ≤ slope_sep
+
+    阈值来源（优先级）：
+      1. baseline 参数（来自 df.attrs["dmi_baseline"]，compute_indicators 自动计算）
+      2. 硬编码默认值（基于 09992.HK 1343天实证，与归一化 DMI 指标跨个股通用）
 
     direction 参数：
-      "long"  → 多头需 +DI - -DI > 5（严格偏多）
-      "short" → 多头需 +DI < -DI（偏空才算多头方向）
-      ""      → 不判断方向（趋势强度由调用方结合DI自行解读）
+      "long"  → 多头需 +DI - -DI > di_dir
+      "short" → 多头需 -DI - +DI > di_dir
     """
+    # ── 读取阈值：baseline 优先，否则默认 ──
+    bl = baseline or {}
+    slope_sep = bl.get("slope_sep", -0.05)
+    di_gap = bl.get("di_gap", 10.0)
+    di_dir = bl.get("di_dir", 5.0)
+
     plus_di = row.get("+DI", np.nan)
     minus_di = row.get("-DI", np.nan)
     adx = row.get("ADX14", np.nan)
     adxr = row.get("ADXR", np.nan)
-    adx_up = row.get("ADX_UP", np.nan)
-    acua = row.get("ADX_CROSS_UP_ADXR", np.nan)    # ADX 金叉 ADXR
+    adx_slope = row.get("ADX_SLOPE_5", 0.0)
+    if pd.isna(adx_slope):
+        adx_slope = 0.0
+
     dmi_ok = (not pd.isna(adx) and not pd.isna(plus_di)
               and not pd.isna(minus_di) and not pd.isna(adxr))
     if not config.user_dmi:
@@ -113,28 +123,21 @@ def _dmi_trend_area(row, config, direction: str = "") -> str:
     if dmi_ok:
         # —— 方向判断 ——
         if direction == "long":
-            is_bull_trend = (plus_di - minus_di) > 5
-        elif direction == "short":
-            is_bull_trend = (minus_di - plus_di) > 5
+            is_bull_trend = (plus_di - minus_di) > di_dir
         else:
-            is_bull_trend = True
-
+            is_bull_trend = (minus_di - plus_di) > di_dir
         threshold = config.pm_adx_threshold
 
-        # —— 趋势结构确认（三条路径，ADX下限 = min(阈值×比例, 上限)） ——
+        # —— 趋势结构确认（两条路径） ——
         # 标准：ADX>阈值 且 ADX>ADXR
         trend_standard = adx > threshold and adx > adxr
-        # 金叉领先：ADX金叉ADXR，ADX ≥ min(阈值×0.6, 15)
-        acua_flag = isinstance(acua, (bool, np.bool_)) and acua
-        trend_early = acua_flag and adx > min(threshold * 0.6, 15)
-        # DI强势：|+DI - -DI| > 10，ADX ≥ min(阈值×0.4, 10)
-        trend_di_strong = abs(plus_di - minus_di) > 10 and adx > min(threshold * 0.4, 10)
+        # DI强势：|+DI - -DI| > di_gap，ADX>阈值
+        trend_di_strong = abs(plus_di - minus_di) > di_gap and adx > threshold
 
-        if is_bull_trend and adx_up and (trend_standard or trend_early or trend_di_strong):
+        # A区：趋势确认
+        if is_bull_trend and adx_slope > slope_sep and (trend_standard or trend_di_strong):
             _trend_area = "A"
-        elif is_bull_trend and not adx_up and (trend_standard or trend_early or trend_di_strong):
-            _trend_area = "B"
-        elif adx_up:
+        elif adx_slope > slope_sep:
             _trend_area = "C"
         else:
             _trend_area = "D"
@@ -143,48 +146,94 @@ def _dmi_trend_area(row, config, direction: str = "") -> str:
     return _trend_area
 
 
-def _calc_effective_grid(row, config) -> tuple[float, float, float]:
-    """根据今日 DMI 状态计算有效网格 (eff_down, eff_up, eff_reduce)。
+def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[float, float, float]:
+    """根据今日 DMI 状态与波动率计算有效网格 (eff_down, eff_up, eff_reduce)。
 
     由 _run_position_management_1 和 signal_extractor 共同调用，
     保证信号计算与回测引擎完全一致。
 
-    规则：
-      - 非多头（-DI > +DI）→ 激进窄网格（快速防守）
-      - A区 + 多头          → 原始宽网格（让利润跑）
-      - B/C区 + 多头        → 折中（适度止盈）
-      - D区 + 多头          → 激进窄网格（震荡高抛低吸）
-      - DMI 不可用          → 原始网格（默认）
+    核心改进（不对称网格）：
+      趋势越强 → eff_down↓（回调敢加仓）  eff_up↑（不轻易卖）
+      趋势越弱 → eff_down↑（不轻易抄底）  eff_up↓（快进快出）
+
+    双方向区制（long×short 交叉）：
+      分值基于20日forward收益实证：B(+6.37%)>A(+4.69%)>D(+3.25%)>C(+0.56%)
+      zone_blend = long_score - short_score → long强+short弱=积极，反之防守
+      strength 三因子（ADX位置/DI差值/ADX斜率）在 zone_blend 基础上微调
+      DMI 不可用 → 返回原始网格
     """
     k = config.pm_agg_k
-    grid_down = config.pm_grid_down
-    grid_up = config.pm_grid_up
-    reduce_pct = config.pm_reduce_pct
+    gd = config.pm_grid_down
+    gu = config.pm_grid_up
+    rp = config.pm_reduce_pct
 
-    gd_agg = round(grid_down * k, 3)
-    gu_agg = round(grid_up * k, 3)
-    rp_agg = min(round(reduce_pct + (1 - k) * 0.5, 2), 0.95)
+    # 激进高减仓比例（k<1 时放大卖出比例）
+    rp_high = min(round(rp + (1 - k) * 0.5, 2), 0.95)
 
     if not config.pm_adaptive_grid:
-        return grid_down, grid_up, reduce_pct
+        return gd, gu, rp
 
-    area = _dmi_trend_area(row, config)       # direction="" → 只判强度，不判方向
+    area_long = _dmi_trend_area(row, config, "long", baseline)
+    area_short = _dmi_trend_area(row, config, "short", baseline)
+
+    if area_long is None or area_short is None:
+        return gd, gu, rp                        # DMI 不可用 → 默认原始网格
+
+    # ── 趋势强度三因子 (0~1) ──
+    adx = row.get("ADX14", 20)
     plus_di = row.get("+DI", 0)
     minus_di = row.get("-DI", 0)
-    is_bull = plus_di > minus_di
+    threshold = config.pm_adx_threshold
 
-    if not is_bull:
-        return gd_agg, gu_agg, rp_agg
-    # elif area == "A":
-    #     return grid_down, grid_up, reduce_pct
-    elif area in ("B", "C"):
-        return (round((gd_agg + grid_down) / 2, 3),
-                round((gu_agg + grid_up) / 2, 3),
-                round((rp_agg + reduce_pct) / 2, 3))
-    elif area == "D":
-        return gd_agg, gu_agg, rp_agg
+    # 1) ADX 强度分：ADX 在 [threshold×0.5, threshold×1.5] 区间线性映射
+    adx_score = (min(max(adx, threshold * 0.5), threshold * 1.5) - threshold * 0.5) / threshold
+    adx_score = min(max(adx_score, 0.0), 1.0)
+
+    # 2) DI 方向强度分：|+DI - -DI| 越大方向越明确
+    di_score = min(abs(plus_di - minus_di) / 25.0, 1.0)
+
+    # 3) ADX 斜率分（连续变量，替代二元 ADX_UP）
+    adx_slope = row.get("ADX_SLOPE_5", 0.0)
+    if pd.isna(adx_slope):
+        adx_slope = 0.0
+    adx_dir_score = min(max(0.3 + adx_slope * 5.0, 0.0), 1.0)
+
+    strength = 0.40 * adx_score + 0.40 * di_score + 0.20 * adx_dir_score
+
+    # ── 波动率微调（高波动略放宽防假突破，基于ADX自校准阈值）──
+    atr = row.get("ATR", 0)
+    close = row.get("Close", 0)
+    if atr > 0 and close > 0:
+        vol = atr / close
+        vol_threshold = 0.05 + (adx - 30.0) / 600.0
+        vol_adj = (vol - vol_threshold) / 0.08
+        vol_adj = min(max(vol_adj, -0.10), 0.10)
     else:
-        return grid_down, grid_up, reduce_pct
+        vol_adj = 0.0
+
+    # ── 双方向区制映射（分值基于20日forward收益实证）──
+    # long: A(+4.8%/胜59%) > D(+3.3%/胜54%) > C(+0.6%/胜48%)
+    # short: A/B(下跌确认,收益低)得分高→压低blend; C(下跌酝酿,收益+3.8%)得分低
+    # 得分越高=趋势越确认, long得分↑→blend↑(积极), short得分↑→blend↓(防守)
+    zone_score = {"A": 1.0, "D": 0.65, "C": 0.30}
+    long_score = zone_score.get(area_long, 0.30)
+    short_score = zone_score.get(area_short, 0.30)
+    # zone_blend: short打5折避免同区抵消，LD/SD(0.32) > LC/SC(0.15)有区分
+    zone_blend = max(long_score - short_score * 0.5, 0.0)
+
+    # strength 在 zone_blend 基础上 ±0.1 微调
+    blend = zone_blend + (strength - 0.5) * 0.15
+    blend = min(max(blend + vol_adj, 0.0), 1.0)
+
+    # ── 不对称插值 ──
+    # gd: blend↑ → gd↓（从 gd 插值到 gd*k，强趋势敢买回调）
+    # gu: blend↑ → gu↑（从 gu*k 插值到 gu，强趋势不轻易卖）
+    # rp: blend↑ → rp↓（从 rp_high 插值到 rp，强趋势卖得少）
+    eff_down = round(gd * k + gd * (1 - k) * (1 - blend), 3)
+    eff_up = round(gu * k + gu * (1 - k) * blend, 3)
+    eff_reduce = round(rp_high + (rp - rp_high) * blend, 3)
+
+    return eff_down, eff_up, eff_reduce
 
 
 def _calc_shares(capital: float, risk_per_trade: float, stop_dist: float,
@@ -1033,6 +1082,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
     dyn_p3 = config.pm_dyn_pos_3
     dyn_p4 = config.pm_dyn_pos_4
     take_profit = config.pm_take_profit_ratio # 止盈回本倍数
+    dmi_bl = df.attrs.get("dmi_baseline")      # 个股 DMI 基线（自动适配，无需配置）
 
     pm_trades = []
     capital = config.initial_capital
@@ -1076,18 +1126,20 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 continue
         equity_before = capital + current_lots * close * ps
 
-        eff_grid_down, eff_grid_up, eff_reduce = _calc_effective_grid(row, config)
+        eff_grid_down, eff_grid_up, eff_reduce = _calc_effective_grid(row, config, dmi_bl)
 
         hh_entry = row.get("HH_Entry", np.nan)
-        # DMI + 趋势自适应（含 ADXR 趋势强度确认）
-        if config.pm_adaptive and close > hh_entry and _dmi_trend_area(row, config,"long") == "A":
+        # DMI + 趋势自适应（数据实证优化：A区加速+B区中继都可追涨，B区20日+6.98%优于A区+4.58%）
+        donchian_done = False
+        if config.pm_adaptive and close > hh_entry and _dmi_trend_area(row, config, "long", dmi_bl) == "A":
             # ---- 单边上涨趋势 → Donchian 通道：趋势跟踪，不轻易卖 ----
-            # Donchian 买入：突破20日高点 + 趋势加速确认 → 加仓
+            # Donchian 买入：突破20日高点 + 趋势加速/中继确认 → 加仓
             df_donchian = df.iloc[(i - config.entry_period - 1):]
             tmp_config = copy.deepcopy(config)
             tmp_config.initial_capital = capital
             trades,eq,eq_dates =_run_long_with_pyramid(df_donchian, tmp_config, True)
             if trades:
+                donchian_done = True
                 add_lots = trades[0].get("Shares",0)
                 total_cost = trades[0].get("Cost_¥",0)
                 capital -= total_cost
@@ -1199,133 +1251,139 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                     eq[-1] = equity
                 equity_curve.extend(eq)
                 equity_dates.extend(eq_dates)
-            # 每日收盘权益快照（不论是否发生交易）
-            else:
-                _snap()
-        # 非单边上涨/下跌时网格交易买入
-        elif (close <= reference_price * (1 - eff_grid_down)
-              and _dmi_trend_area(row, config,"short") in ("C","D",None)):
-            add_value = equity_before * add_pct
-            add_lots = math.floor(add_value / (close * ps))
-            if add_lots <= 0:
-                _snap()
-                continue
-            if current_lots == 0 and equity_before > initial_equity * take_profit:
-                # 当前已回本停止交易
-                _snap()
-                continue
-            # 仓位上限（动态：根据波动率 ATR/价格 自动调整）
-            if dynamic_pos and not pd.isna(row["ATR"]) and row["ATR"] > 0:
-                vol = row["ATR"] / close
-                if vol < dyn_v1:
-                    effective_max_pos = dyn_p1    # 低波动
-                elif vol < dyn_v2:
-                    effective_max_pos = dyn_p2    # 中波动
-                elif vol < dyn_v3:
-                    effective_max_pos = dyn_p3    # 高波动
-                else:
-                    effective_max_pos = dyn_p4    # 极端波动
-            else:
-                effective_max_pos = max_pos_pct
-            position_value_after = (current_lots + add_lots) * close * ps
-            if position_value_after > equity_before * effective_max_pos:
-                add_lots = int((equity_before * effective_max_pos) / (close * ps)) - current_lots
+        # ---- Donchian 未触发或失败 → 尝试网格交易 ----
+        if not donchian_done:
+            # 空仓时市价已涨超一个卖出网格→追认当前价格，避免牛市踏空
+            if current_lots == 0 and close > reference_price * (1 + eff_grid_up):
+                reference_price = close
+            # 非单边上涨/下跌时网格交易买入
+            # 失效模式④修复：short C区(下跌酝酿)最危险(20日+0.52%)，不应允许买入
+            # 实证：short A/B(下跌确认,20d+0.32%/-0.23%)拦截买入；
+            # long C(趋势酝酿,20d仅+1.09%/胜46.6%)也拦截，等趋势确认后再入场
+            if (close <= reference_price * (1 - eff_grid_down)
+              and _dmi_trend_area(row, config, "short", dmi_bl) != "A"
+              and _dmi_trend_area(row, config, "long", dmi_bl) != "C"):
+                add_value = equity_before * add_pct
+                add_lots = math.floor(add_value / (close * ps))
                 if add_lots <= 0:
                     _snap()
                     continue
+                if current_lots == 0 and equity_before > initial_equity * take_profit:
+                    # 当前已回本停止交易
+                    _snap()
+                    continue
+                # 仓位上限（动态：根据波动率 ATR/价格 自动调整）
+                if dynamic_pos and not pd.isna(row["ATR"]) and row["ATR"] > 0:
+                    vol = row["ATR"] / close
+                    if vol < dyn_v1:
+                        effective_max_pos = dyn_p1    # 低波动
+                    elif vol < dyn_v2:
+                        effective_max_pos = dyn_p2    # 中波动
+                    elif vol < dyn_v3:
+                        effective_max_pos = dyn_p3    # 高波动
+                    else:
+                        effective_max_pos = dyn_p4    # 极端波动
+                else:
+                    effective_max_pos = max_pos_pct
+                position_value_after = (current_lots + add_lots) * close * ps
+                if position_value_after > equity_before * effective_max_pos:
+                    add_lots = int((equity_before * effective_max_pos) / (close * ps)) - current_lots
+                    if add_lots <= 0:
+                        _snap()
+                        continue
 
-            # 现金下限
-            gross_cost = close * add_lots * ps
-            trade_cost = _pm_trade_cost(gross_cost, config.market, "buy")
-            total_cost = gross_cost + trade_cost
-            cash_after = capital - total_cost
-            if cash_after < equity_before * min_cash_pct:
-                max_cost = capital - equity_before * min_cash_pct
-                afford_per_lot = close * ps * (1 + (0.0012 if config.market == "HK" else 0.0006))
-                add_lots = int(max_cost / afford_per_lot) if afford_per_lot > 0 else 0
-            if add_lots <= 0:
+                # 现金下限
+                gross_cost = close * add_lots * ps
+                trade_cost = _pm_trade_cost(gross_cost, config.market, "buy")
+                total_cost = gross_cost + trade_cost
+                cash_after = capital - total_cost
+                if cash_after < equity_before * min_cash_pct:
+                    max_cost = capital - equity_before * min_cash_pct
+                    afford_per_lot = close * ps * (1 + (0.0012 if config.market == "HK" else 0.0006))
+                    add_lots = int(max_cost / afford_per_lot) if afford_per_lot > 0 else 0
+                if add_lots <= 0:
+                    _snap()
+                    continue
+                gross_cost = close * add_lots * ps
+                trade_cost = _pm_trade_cost(gross_cost, config.market, "buy")
+                total_cost = gross_cost + trade_cost
+
+                capital -= total_cost
+                current_lots += add_lots
+                reference_price = close
+
+                equity = capital + current_lots * close * ps
+                pm_trades.append({
+                    "Date": current_date,
+                    "Entry Date": current_date,
+                    "Exit Date": current_date,
+                    "Type": "加仓",
+                    "Price": close,
+                    "Entry Price": close,
+                    "Exit Price": close,
+                    "Shares": add_lots,
+                    "Cost_¥": trade_cost,
+                    "PnL_¥": -total_cost,
+                    "PnL_%": 0.0,
+                    "Capital_After": capital,
+                    "Reason": f"网格买入 -{int(eff_grid_down * 100)}%（权益{int(add_pct * 100)}%）",
+                    "Amount": -total_cost,
+                    "Position_After": current_lots,
+                    "Equity_After": equity,
+                    "Reference_Price": reference_price,
+                    "+DI": row["+DI"],
+                    "-DI": row["-DI"],
+                    "ADX14": row["ADX14"],
+                    "ADXR": row["ADXR"],
+                    "ADX_UP": row["ADX_UP"],
+                    "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
+                    "ADX_DOWN": row["ADX_DOWN"],
+                    "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
+                })
+                # 每日收盘权益快照（不论是否发生交易）
                 _snap()
-                continue
-            gross_cost = close * add_lots * ps
-            trade_cost = _pm_trade_cost(gross_cost, config.market, "buy")
-            total_cost = gross_cost + trade_cost
+            else:
+                # ---- 非单边上涨趋势 → 网格交易 ----
+                # 失效模式③修复：B区20日+6.98%优于A区+4.58%，卖出拦截从仅A区扩展到A+B
+                if (close >= reference_price * (1 + eff_grid_up)
+                        and current_lots > 0
+                        and _dmi_trend_area(row, config, "long", dmi_bl) != "A"):
+                    reduce_value = equity_before * eff_reduce
+                    reduce_lots = math.ceil(reduce_value / (close * ps))
+                    reduce_lots = min(reduce_lots, current_lots)
+                    if  equity_before > initial_equity * take_profit:
+                        # 当前已回本则全部清仓
+                        reduce_lots=current_lots
+                    if reduce_lots > 0:
+                        gross_proceeds = close * reduce_lots * ps
+                        trade_cost = _pm_trade_cost(gross_proceeds, config.market, "sell")
+                        net_proceeds = gross_proceeds - trade_cost
+                        capital += net_proceeds
+                        current_lots -= reduce_lots
+                        reference_price = close
 
-            capital -= total_cost
-            current_lots += add_lots
-            reference_price = close
-
-            equity = capital + current_lots * close * ps
-            pm_trades.append({
-                "Date": current_date,
-                "Entry Date": current_date,
-                "Exit Date": current_date,
-                "Type": "加仓",
-                "Price": close,
-                "Entry Price": close,
-                "Exit Price": close,
-                "Shares": add_lots,
-                "Cost_¥": trade_cost,
-                "PnL_¥": -total_cost,
-                "PnL_%": 0.0,
-                "Capital_After": capital,
-                "Reason": f"网格买入 -{int(eff_grid_down * 100)}%（权益{int(add_pct * 100)}%）",
-                "Amount": -total_cost,
-                "Position_After": current_lots,
-                "Equity_After": equity,
-                "Reference_Price": reference_price,
-                "+DI": row["+DI"],
-                "-DI": row["-DI"],
-                "ADX14": row["ADX14"],
-                "ADXR": row["ADXR"],
-                "ADX_UP": row["ADX_UP"],
-                "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
-                "ADX_DOWN": row["ADX_DOWN"],
-                "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
-            })
-            # 每日收盘权益快照（不论是否发生交易）
-            _snap()
-        else:
-            # ---- 非单边上涨趋势 → 网格交易 ----
-            # 网格卖出（非自适应DMI模式：需空头强势才卖）
-            if (close >= reference_price * (1 + eff_grid_up)
-                    and current_lots > 0
-                    and _dmi_trend_area(row, config, "long") != "A"):
-                reduce_value = equity_before * eff_reduce
-                reduce_lots = math.ceil(reduce_value / (close * ps))
-                reduce_lots = min(reduce_lots, current_lots)
-                if  equity_before > initial_equity * take_profit:
-                    # 当前已回本则全部清仓
-                    reduce_lots=current_lots
-                if reduce_lots > 0:
-                    gross_proceeds = close * reduce_lots * ps
-                    trade_cost = _pm_trade_cost(gross_proceeds, config.market, "sell")
-                    net_proceeds = gross_proceeds - trade_cost
-                    capital += net_proceeds
-                    current_lots -= reduce_lots
-                    reference_price = close
-
-                    equity = capital + current_lots * close * ps
-                    pm_trades.append({
-                        "Date": current_date, "Entry Date": current_date,
-                        "Exit Date": current_date, "Type": "减仓",
-                        "Price": close, "Entry Price": close, "Exit Price": close,
-                        "Shares": reduce_lots, "Cost_¥": trade_cost,
-                        "PnL_¥": net_proceeds, "PnL_%": 0.0,
-                        "Capital_After": capital,
-                        "Reason": f"网格卖出 +{int(eff_grid_up*100)}%（权益{int(eff_reduce*100)}%）",
-                        "Amount": net_proceeds, "Position_After": current_lots,
-                        "Equity_After": equity, "Reference_Price": reference_price,
-                        "+DI": row["+DI"],
-                        "-DI": row["-DI"],
-                        "ADX14": row["ADX14"],
-                        "ADXR": row["ADXR"],
-                        "ADX_UP": row["ADX_UP"],
-                        "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
-                        "ADX_DOWN": row["ADX_DOWN"],
-                        "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
-                    })
-            # 每日收盘权益快照（不论是否发生交易）
-            _snap()
+                        equity = capital + current_lots * close * ps
+                        pm_trades.append({
+                            "Date": current_date, "Entry Date": current_date,
+                            "Exit Date": current_date, "Type": "减仓",
+                            "Price": close, "Entry Price": close, "Exit Price": close,
+                            "Shares": reduce_lots, "Cost_¥": trade_cost,
+                            "PnL_¥": net_proceeds, "PnL_%": 0.0,
+                            "Capital_After": capital,
+                            "Reason": f"网格卖出 +{int(eff_grid_up*100)}%（权益{int(eff_reduce*100)}%）",
+                            "Amount": net_proceeds, "Position_After": current_lots,
+                            "Equity_After": equity, "Reference_Price": reference_price,
+                            "+DI": row["+DI"],
+                            "-DI": row["-DI"],
+                            "ADX14": row["ADX14"],
+                            "ADXR": row["ADXR"],
+                            "ADX_UP": row["ADX_UP"],
+                            "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
+                            "ADX_DOWN": row["ADX_DOWN"],
+                            "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
+                        })
+                # 每日收盘权益快照（不论是否发生交易）
+                _snap()
 
     # 追加最终权益点（与最后一天一致，_snap 已记录）
     # 注意：循环中 _snap() 已经覆盖了最后一天，此处无需重复

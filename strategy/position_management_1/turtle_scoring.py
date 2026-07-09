@@ -18,7 +18,9 @@ import itertools
 import os
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
+import multiprocessing
 
 import numpy as np
 import pandas as pd
@@ -32,52 +34,95 @@ from core.data import fetch_data
 from core.indicators import compute_indicators
 from core.engine import run_backtest
 from core.statistics import calc_stats
-from core.scoring import entropy_weights, compute_percentile_scores, apply_reward_penalty
+from core.scoring import (compute_percentile_scores,
+                          apply_reward_penalty)
 
 # 复用已有函数
 from strategy.position_management_1.turtle_optimize import (
     run_one_backtest, _constraint_ok, _map_stats_keys,
 )
 from strategy.position_management_1.grid_search_pm import (
-    prepare_scenario_dfs, SCENARIO_LABEL_MAP, SCENARIO_PROBS,
+    prepare_scenario_dfs, SCENARIO_LABEL_MAP, get_scenario_probs,
 )
 from strategy.position_management_1.simulate_market_scenarios import (
     get_last_price as sim_get_last_price,
 )
 
 # ═══════════════════════════════════════════════════════════════
-# 配置
+# 配置 — key 为 ts_code，通过 init_config(ts_code) 激活
 # ═══════════════════════════════════════════════════════════════
 
-BASE_KWARGS = dict(
-    ts_code="09992.HK",
-    stock_name="泡泡玛特",
-    market="HK",
-    mode="position_management_1",
-    per_shares=200,
-    start_date="20201211",
-    pm_start_date="20210112",
-    user_dmi=True,
-    pm_adaptive=True,
-    pm_adaptive_grid=False,      # 关闭网格自适应
-    pm_dynamic_position=False,
-    ema_fast=0,
-    ema_slow=0,
-    pm_initial_shares=2,
-    initial_capital=40000,
-    pm_agg_k=1.0,                # 屏蔽
-    pm_take_profit_ratio=1.30,
-    data_source="tushare",
-)
-
-# 5个核心参数 — 基于数据驱动选择
-SWEEP_RANGES = {
-    "pm_grid_down":      [0.05, 0.07, 0.10, 0.12],
-    "pm_grid_up":        [0.03, 0.04, 0.05, 0.07],
-    "pm_reduce_pct":     [0.35, 0.50, 0.60, 0.75],
-    "pm_add_pct":        [0.25, 0.30, 0.35, 0.40, 0.50],
-    "pm_adx_threshold":  [25, 30, 35],
+_ALL_BASE_KWARGS = {
+    "09992.HK": dict(  # 泡泡玛特
+        ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
+        mode="position_management_1", per_shares=200,
+        start_date="20201211", pm_start_date="20210112",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=2, initial_capital=40000,
+        data_source="tushare",
+    ),
+    "03690.HK": dict(  # 美团
+        ts_code="03690.HK", stock_name="美团", market="HK",
+        mode="position_management_1", per_shares=100,
+        start_date="20181023", pm_start_date="20180920",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=2, initial_capital=40000,
+        data_source="tushare",
+    ),
+    "02015.HK": dict(  # 理想
+        ts_code="02015.HK", stock_name="理想", market="HK",
+        mode="position_management_1", per_shares=100,
+        pm_start_date="20220913", start_date="20220813",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=25, initial_capital=40000,
+        data_source="akshare",
+    ),
 }
+
+_ALL_SWEEP_RANGES = {
+    "09992.HK": {
+        "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
+        "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
+        "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
+        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+        "pm_adx_threshold": [25, 30, 35],
+        "pm_agg_k": [1.0],
+    },
+    "03690.HK": {
+        "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
+        "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
+        "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
+        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+        "pm_adx_threshold": [25, 30, 35],
+        "pm_agg_k": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    },
+    "02015.HK": {
+        "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
+        "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
+        "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
+        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+        "pm_adx_threshold": [25, 30, 35],
+        "pm_agg_k": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    },
+}
+
+# 运行时激活的配置（由 init_config 设置）
+BASE_KWARGS = None
+SWEEP_RANGES = None
+
+
+def init_config(ts_code: str):
+    """根据 ts_code 激活对应的 BASE_KWARGS 和 SWEEP_RANGES。"""
+    global BASE_KWARGS, SWEEP_RANGES
+    if ts_code not in _ALL_BASE_KWARGS:
+        raise KeyError(f"未配置 {ts_code} 的 BASE_KWARGS，请在 _ALL_BASE_KWARGS 中添加")
+    if ts_code not in _ALL_SWEEP_RANGES:
+        raise KeyError(f"未配置 {ts_code} 的 SWEEP_RANGES，请在 _ALL_SWEEP_RANGES 中添加")
+    BASE_KWARGS = _ALL_BASE_KWARGS[ts_code]
+    SWEEP_RANGES = _ALL_SWEEP_RANGES[ts_code]
 
 PARAM_LABELS = {
     "pm_grid_down": "gd",
@@ -85,7 +130,27 @@ PARAM_LABELS = {
     "pm_reduce_pct": "rp",
     "pm_add_pct": "ap",
     "pm_adx_threshold": "adx",
+    "pm_agg_k": "k",
 }
+
+# 并行工作进程数（可通过命令行 --workers N 覆盖）
+WORKERS = max(1, multiprocessing.cpu_count() - 1)
+
+# 固定熵权 — key 为 ts_code，通过 get_scoring_weights(ts_code) 获取
+SCORING_WEIGHTS = {
+    "02015.HK": dict(excess=0.5423, robust_sharpe=0.2356, r_cubed=0.2221),  # 理想
+    "09992.HK": dict(excess=0.4201, robust_sharpe=0.2188, r_cubed=0.3611),  # 泡泡玛特
+    "01810.HK": dict(excess=0.3461, robust_sharpe=0.3455, r_cubed=0.3084),  # 小米
+    "06181.HK": dict(excess=0.2767, robust_sharpe=0.2209, r_cubed=0.5024),  # 老铺
+    "03690.HK": dict(excess=0.361, robust_sharpe=0.207, r_cubed=0.4319),    # 美团
+}
+
+
+def get_scoring_weights(ts_code: str) -> dict:
+    """获取指定标的的评分权重配置。"""
+    if ts_code not in SCORING_WEIGHTS:
+        raise KeyError(f"未配置 {ts_code} 的评分权重，请在 SCORING_WEIGHTS 中添加")
+    return SCORING_WEIGHTS[ts_code]
 
 # ═══════════════════════════════════════════════════════════════
 # 工具函数
@@ -107,6 +172,314 @@ def _compute_buy_hold(df: pd.DataFrame, start_date: str) -> float:
 
 def _now():
     return time.strftime("%H:%M:%S")
+
+
+def _split_batches(items: list, n_batches: int) -> list[list]:
+    """将列表分割为 n_batches 个大致均匀的子列表。"""
+    if n_batches <= 1 or len(items) <= n_batches:
+        return [items]
+    k, m = divmod(len(items), n_batches)
+    batches = []
+    start = 0
+    for i in range(n_batches):
+        end = start + k + (1 if i < m else 0)
+        if end > start:
+            batches.append(items[start:end])
+        start = end
+    return batches
+
+
+# ═══════════════════════════════════════════════════════════════
+# 多进程 Worker 函数（模块级别，确保可 pickle）
+# ═══════════════════════════════════════════════════════════════
+
+def _worker_stage_a(args):
+    """Stage A worker: 对一批参数组合在全量历史上回测。"""
+    params_batch, base_kwargs, df, benchmark_return = args
+    results = []
+    for params in params_batch:
+        stats = run_one_backtest(params, base_kwargs, df, benchmark_return)
+        if stats:
+            stats["_window"] = "full"
+            stats["_params"] = params
+            results.append(stats)
+    return results
+
+
+def _worker_stage_b(args):
+    """Stage B worker: 对一批参数组合在所有滚动窗口上回测。"""
+    params_batch, base_kwargs, df, warmup, window_bars, step_bars = args
+    results = []
+    dates = pd.to_datetime(df["Date"])
+    n = len(df)
+    for params in params_batch:
+        for start_idx in range(warmup, n - window_bars, step_bars):
+            end_idx = start_idx + window_bars
+            warmup_start = max(0, start_idx - warmup)
+            df_win = df.iloc[warmup_start:end_idx]
+            ws = pd.Timestamp(dates.iloc[start_idx]).strftime("%Y%m%d")
+
+            win_mask = df_win["Date"] >= ws
+            win_close = df_win.loc[win_mask, "Close"]
+            bm = ((win_close.iloc[-1] / win_close.iloc[0] - 1) * 100
+                  if len(win_close) >= 2 else 0.0)
+
+            win_kwargs = {**base_kwargs, "pm_start_date": ws}
+            stats = run_one_backtest(params, win_kwargs, df_win, benchmark_return=bm)
+            if stats and stats.get("总交易", 0) > 0:
+                stats["_window"] = f"rolling_{ws}"
+                stats["_params"] = params
+                results.append(stats)
+    return results
+
+
+def _worker_stage_c(args):
+    """Stage C worker: 对一批参数组合在所有模拟场景上回测。"""
+    params_batch, base_kwargs, scenario_dfs, scenario_benchmarks, sim_start = args
+    results = []
+    for params in params_batch:
+        for sc_label, sc_df in scenario_dfs.items():
+            sc_kwargs = {**base_kwargs, "pm_start_date": sim_start}
+            stats = run_one_backtest(params, sc_kwargs, sc_df,
+                                     benchmark_return=scenario_benchmarks[sc_label])
+            if stats and stats.get("总交易", 0) > 0:
+                stats["_window"] = f"sim_{sc_label}"
+                stats["_params"] = params
+                results.append(stats)
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════
+# Bootstrap 敏感性分析
+# ═══════════════════════════════════════════════════════════════
+
+def _perturb_sweep_ranges(sweep_ranges: dict, rng: np.random.RandomState) -> dict:
+    """随机扰动 SWEEP_RANGES：每个参数随机保留 75-90% 的候选值。"""
+    perturbed = {}
+    for pname, values in sweep_ranges.items():
+        if len(values) <= 2:
+            perturbed[pname] = list(values)
+        else:
+            keep_frac = rng.uniform(0.75, 0.90)
+            n_keep = max(2, int(len(values) * keep_frac))
+            kept = sorted(rng.choice(values, size=n_keep, replace=False).tolist())
+            perturbed[pname] = kept
+    return perturbed
+
+
+def _generate_param_combos(sweep_ranges: dict) -> list[dict]:
+    """从 SWEEP_RANGES 生成参数组合列表（笛卡尔积 + 约束过滤）。"""
+    import itertools
+    param_names = list(sweep_ranges.keys())
+    combos = []
+    for values in itertools.product(*sweep_ranges.values()):
+        params = dict(zip(param_names, values))
+        if _constraint_ok(params):
+            combos.append(params)
+    return combos
+
+
+def bootstrap_sensitivity(base_kwargs: dict, df_base: pd.DataFrame,
+                           full_bm: float, n_iter: int = 20,
+                           n_workers: int = 1, seed: int = 42) -> dict:
+    """Bootstrap 敏感性分析：多次扰动 SWEEP_RANGES，评估最优参数和熵权的稳定性。
+
+    对每次扰动：
+      1. 随机丢弃 SWEEP_RANGES 中每个参数 10-25% 的候选值
+      2. 生成新的参数组合集合
+      3. 仅跑 Stage A（全量历史回测），计算熵权和百分位排名
+      4. 记录最优参数和熵权
+
+    最后汇总所有迭代的结果，报告各参数最优值的中位数、标准差、变异系数。
+
+    Args:
+        base_kwargs: 基础回测参数
+        df_base: 行情数据
+        full_bm: 全量买入持有基准收益
+        n_iter: 扰动次数（建议 20-50）
+        n_workers: 并行进程数
+        seed: 基础随机种子
+
+    Returns:
+        {
+            "param_stability": {pname: {median, std, cv, p25, p75, all_values}},
+            "weight_stability": {metric: {mean, std, all_values}},
+            "rank_stability": {pname: {top1_freq: {val: count}}},
+            "all_best_params": [...],
+            "all_weights": [...],
+        }
+    """
+    print(f"\n{'='*60}")
+    print(f"🔬 Bootstrap 敏感性分析 ({n_iter} 次扰动)")
+    print(f"{'='*60}")
+    print(f"  方法: 每次随机丢弃 SWEEP_RANGES 中 10-25% 候选值")
+    print(f"  范围: Stage A 全量历史 + 熵权 + 百分位排名")
+    print(f"  目标: 评估最优参数和权重的稳定性\n")
+
+    all_best_params = []  # [{pname: val, "score": ...}, ...]
+    all_weights = []      # [{excess: w, ...}, ...]
+    rng = np.random.RandomState(seed)
+
+    for iteration in range(n_iter):
+        iter_seed = rng.randint(0, 2**31 - 1)
+        iter_rng = np.random.RandomState(iter_seed)
+
+        # 扰动 SWEEP_RANGES
+        perturbed_ranges = _perturb_sweep_ranges(SWEEP_RANGES, iter_rng)
+        combos = _generate_param_combos(perturbed_ranges)
+
+        # 仅 Stage A：全量历史回测
+        from strategy.position_management_1.turtle_optimize import (
+            run_one_backtest, _map_stats_keys,
+        )
+        results = []
+        for params in combos:
+            stats = run_one_backtest(params, base_kwargs, df_base,
+                                     benchmark_return=full_bm)
+            if stats and stats.get("总交易", 0) > 0:
+                stats = _map_stats_keys(stats)
+                stats["_params"] = params
+                results.append(stats)
+
+        if len(results) < 3:
+            continue
+
+        # 使用固定权重
+        weights = get_scoring_weights(base_kwargs["ts_code"])
+        all_weights.append(weights)
+
+        # 百分位排名
+        compute_percentile_scores(results, weights)
+
+        # 最优参数
+        best = max(results, key=lambda r: r["score"])
+        best_params = {k: best["_params"].get(k, None) for k in SWEEP_RANGES}
+        best_params["score"] = best["score"]
+        best_params["_iter"] = iteration
+        all_best_params.append(best_params)
+
+        # 进度
+        if (iteration + 1) % 5 == 0 or iteration == 0:
+            print(f"  [{iteration + 1}/{n_iter}] "
+                  f"combos={len(combos)}→有效{len(results)}  "
+                  f"权重: excess={weights['excess']:.3f} "
+                  f"robust_sharpe={weights['robust_sharpe']:.3f} "
+                  f"r_cubed={weights['r_cubed']:.3f}  "
+                  f"最优综合分={best['score']:.1f}")
+
+    if len(all_best_params) < 3:
+        print("  ⚠️ 有效迭代不足，无法输出稳定性报告")
+        return {}
+
+    # ── 汇总统计 ──
+    df_best = pd.DataFrame(all_best_params)
+    df_w = pd.DataFrame(all_weights)
+
+    print(f"\n  📊 参数稳定性报告 ({len(all_best_params)} 次有效扰动)")
+    print(f"  {'='*80}")
+    print(f"  {'参数':<22} {'中位数':>8} {'标准差':>8} {'CV':>7} {'P25':>8} {'P75':>8} {'范围':>12}")
+    print(f"  {'─'*80}")
+
+    param_stability = {}
+    param_labels = {
+        "pm_grid_down": "gd", "pm_grid_up": "gu",
+        "pm_reduce_pct": "rp", "pm_add_pct": "ap",
+        "pm_adx_threshold": "adx", "pm_agg_k": "k",
+    }
+    for pname in SWEEP_RANGES:
+        vals = df_best[pname].dropna()
+        if len(vals) < 3:
+            continue
+        median = float(vals.median())
+        std = float(vals.std())
+        cv = std / abs(median) if abs(median) > 0.001 else float('inf')
+        p25 = float(vals.quantile(0.25))
+        p75 = float(vals.quantile(0.75))
+
+        param_stability[pname] = {
+            "median": round(median, 4),
+            "std": round(std, 4),
+            "cv": round(cv, 4),
+            "p25": round(p25, 4),
+            "p75": round(p75, 4),
+            "all_values": [round(v, 4) for v in vals.tolist()],
+        }
+
+        label = param_labels.get(pname, pname)
+        cv_flag = ""
+        if cv > 0.15:
+            cv_flag = " ⚠️高变异"
+        elif cv > 0.05:
+            cv_flag = " ⚡中等"
+        else:
+            cv_flag = " ✅稳定"
+        print(f"  {label:<22} {median:>8.3f} {std:>8.3f} {cv:>7.3f}"
+              f" {p25:>8.3f} {p75:>8.3f}"
+              f" [{vals.min():.3f}, {vals.max():.3f}]{cv_flag}")
+
+    print(f"\n  📊 熵权稳定性报告")
+    print(f"  {'─'*50}")
+    print(f"  {'指标':<20} {'均值':>8} {'标准差':>8} {'CV':>7}")
+    print(f"  {'─'*50}")
+
+    weight_stability = {}
+    for metric in ["excess", "robust_sharpe", "r_cubed"]:
+        w_vals = df_w[metric].dropna()
+        mean_w = float(w_vals.mean())
+        std_w = float(w_vals.std())
+        cv_w = std_w / mean_w if mean_w > 0.001 else float('inf')
+        weight_stability[metric] = {
+            "mean": round(mean_w, 4),
+            "std": round(std_w, 4),
+            "cv": round(cv_w, 4),
+            "all_values": [round(v, 4) for v in w_vals.tolist()],
+        }
+        cv_flag = " ⚠️" if cv_w > 0.15 else (" ⚡" if cv_w > 0.05 else " ✅")
+        print(f"  {metric:<20} {mean_w:>8.3f} {std_w:>8.3f} {cv_w:>7.3f}{cv_flag}")
+
+    # ── 排名稳定性：最优参数各值出现频率 ──
+    print(f"\n  📊 排名稳定性 — 各参数值成为最优的频率 (Top 3)")
+    rank_stability = {}
+    for pname in SWEEP_RANGES:
+        label = param_labels.get(pname, pname)
+        value_counts = df_best[pname].value_counts().head(3)
+        rank_stability[pname] = {
+            "top1_freq": {str(k): int(v) for k, v in value_counts.items()}
+        }
+        items = []
+        for val, count in value_counts.items():
+            pct = count / len(df_best) * 100
+            items.append(f"{val:.3f}({pct:.0f}%)")
+        print(f"  {label:<22} {', '.join(items)}")
+
+    # ── 建议 ──
+    print(f"\n  📋 诊断与建议:")
+    high_cv_params = [p for p, s in param_stability.items()
+                      if s["cv"] > 0.10]
+    high_cv_weights = [m for m, s in weight_stability.items()
+                       if s["cv"] > 0.10]
+
+    if high_cv_params:
+        labels = [param_labels.get(p, p) for p in high_cv_params]
+        print(f"  ⚠️ 高变异参数 (CV>0.10): {', '.join(labels)}")
+        print(f"     → 建议: 这些参数的最优值对 sweep 网格敏感，")
+        print(f"            改用连续优化 (turtle_optuna.py) 确认")
+
+    if high_cv_weights:
+        print(f"  ⚠️ 高变异权重 (CV>0.10): {', '.join(high_cv_weights)}")
+        print(f"     → 建议: 运行 core/calibrate.py 在全域采样上固定熵权")
+
+    if not high_cv_params and not high_cv_weights:
+        print(f"  ✅ 所有参数和权重 CV < 0.10，评分体系对 SWEEP_RANGES 稳健")
+
+    return {
+        "param_stability": param_stability,
+        "weight_stability": weight_stability,
+        "rank_stability": rank_stability,
+        "all_best_params": all_best_params,
+        "all_weights": all_weights,
+        "n_iterations": len(all_best_params),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -161,24 +534,27 @@ def main():
     # Stage A: 全量历史回测
     # ═══════════════════════════════════════════════════════
     print(f"\n{'='*60}")
-    print(f"[{_now()}] 🅰 Stage A: 全量历史回测 ({len(param_combos)} 组)")
+    print(f"[{_now()}] 🅰 Stage A: 全量历史回测 ({len(param_combos)} 组, "
+          f"{WORKERS} workers)")
     print(f"{'='*60}")
 
     all_results = []  # 所有窗口×所有参数的结果
     t0 = time.time()
 
-    for idx, params in enumerate(param_combos):
-        stats = run_one_backtest(params, BASE_KWARGS, df_base, benchmark_return=full_bm)
-        if stats:
-            stats["_window"] = "full"
-            stats["_params"] = params
-            all_results.append(stats)
-
-        if (idx + 1) % 100 == 0:
+    batches = _split_batches(param_combos, WORKERS)
+    with ProcessPoolExecutor(max_workers=WORKERS) as executor:
+        futures = {
+            executor.submit(_worker_stage_a,
+                            (batch, BASE_KWARGS, df_base, full_bm)): idx
+            for idx, batch in enumerate(batches)
+        }
+        for future in as_completed(futures):
+            batch_results = future.result()
+            all_results.extend(batch_results)
+            done = sum(1 for f in futures if f.done())
             elapsed = time.time() - t0
-            eta = elapsed / (idx + 1) * (len(param_combos) - idx - 1)
-            print(f"    [{idx+1}/{len(param_combos)}] {elapsed:.0f}s ETA {eta/60:.0f}min  "
-                  f"有效: {len(all_results)}")
+            print(f"    [{done}/{len(batches)} batches] {elapsed:.0f}s  "
+                  f"累计有效: {len(all_results)}")
 
     full_count = len(all_results)
     print(f"  全量完成: {full_count} 组有效  "
@@ -198,37 +574,28 @@ def main():
 
     print(f"\n{'='*60}")
     print(f"[{_now()}] 🅱 Stage B: 滚动窗口回测 "
-          f"({len(param_combos)}组 × ~{n_windows}窗口)")
+          f"({len(param_combos)}组 × ~{n_windows}窗口, {WORKERS} workers)")
     print(f"{'='*60}")
     print(f"  窗口: {WINDOW_BARS}天 × 步长{STEP_BARS}天 × 预热{WARMUP}天")
 
     t0 = time.time()
     rolling_count = 0
 
-    for p_idx, params in enumerate(param_combos):
-        for start_idx in range(WARMUP, n - WINDOW_BARS, STEP_BARS):
-            end_idx = start_idx + WINDOW_BARS
-            warmup_start = max(0, start_idx - WARMUP)
-            df_win = df_base.iloc[warmup_start:end_idx].copy()
-            ws = pd.Timestamp(dates.iloc[start_idx]).strftime("%Y%m%d")
-
-            win_mask = df_win["Date"] >= ws
-            win_close = df_win.loc[win_mask, "Close"]
-            bm = ((win_close.iloc[-1] / win_close.iloc[0] - 1) * 100
-                  if len(win_close) >= 2 else 0.0)
-
-            win_kwargs = {**BASE_KWARGS, "pm_start_date": ws}
-            stats = run_one_backtest(params, win_kwargs, df_win, benchmark_return=bm)
-            if stats and stats.get("总交易", 0) > 0:
-                stats["_window"] = f"rolling_{ws}"
-                stats["_params"] = params
-                all_results.append(stats)
-                rolling_count += 1
-
-        if (p_idx + 1) % 50 == 0:
+    batches = _split_batches(param_combos, WORKERS)
+    with ProcessPoolExecutor(max_workers=WORKERS) as executor:
+        futures = {
+            executor.submit(_worker_stage_b,
+                            (batch, BASE_KWARGS, df_base,
+                             WARMUP, WINDOW_BARS, STEP_BARS)): idx
+            for idx, batch in enumerate(batches)
+        }
+        for future in as_completed(futures):
+            batch_results = future.result()
+            all_results.extend(batch_results)
+            rolling_count += len(batch_results)
+            done = sum(1 for f in futures if f.done())
             elapsed = time.time() - t0
-            eta = elapsed / (p_idx + 1) * (len(param_combos) - p_idx - 1)
-            print(f"    [{p_idx+1}/{len(param_combos)}] {elapsed:.0f}s ETA {eta/60:.0f}min  "
+            print(f"    [{done}/{len(batches)} batches] {elapsed:.0f}s  "
                   f"累计: {len(all_results)}")
 
     print(f"  滚动完成: +{rolling_count} 条  (总累计 {len(all_results)})  "
@@ -238,7 +605,8 @@ def main():
     # Stage C: 8种场景模拟回测
     # ═══════════════════════════════════════════════════════
     print(f"\n{'='*60}")
-    print(f"[{_now()}] 🅲 Stage C: 8种场景模拟回测 ({len(param_combos)}组 × 8场景)")
+    print(f"[{_now()}] 🅲 Stage C: 8种场景模拟回测 "
+          f"({len(param_combos)}组 × 8场景, {WORKERS} workers)")
     print(f"{'='*60}")
 
     t0 = time.time()
@@ -259,22 +627,21 @@ def main():
         last_price, last_date, config0, df_base)
 
     sim_count = 0
-    for p_idx, params in enumerate(param_combos):
-        for sc_label in SCENARIO_LABEL_MAP:
-            sc_kwargs = {**BASE_KWARGS, "pm_start_date": sim_start}
-            stats = run_one_backtest(params, sc_kwargs,
-                                     scenario_dfs[sc_label],
-                                     benchmark_return=scenario_benchmarks[sc_label])
-            if stats and stats.get("总交易", 0) > 0:
-                stats["_window"] = f"sim_{sc_label}"
-                stats["_params"] = params
-                all_results.append(stats)
-                sim_count += 1
-
-        if (p_idx + 1) % 50 == 0:
+    batches = _split_batches(param_combos, WORKERS)
+    with ProcessPoolExecutor(max_workers=WORKERS) as executor:
+        futures = {
+            executor.submit(_worker_stage_c,
+                            (batch, BASE_KWARGS, scenario_dfs,
+                             scenario_benchmarks, sim_start)): idx
+            for idx, batch in enumerate(batches)
+        }
+        for future in as_completed(futures):
+            batch_results = future.result()
+            all_results.extend(batch_results)
+            sim_count += len(batch_results)
+            done = sum(1 for f in futures if f.done())
             elapsed = time.time() - t0
-            eta = elapsed / (p_idx + 1) * (len(param_combos) - p_idx - 1)
-            print(f"    [{p_idx+1}/{len(param_combos)}] {elapsed:.0f}s ETA {eta/60:.0f}min  "
+            print(f"    [{done}/{len(batches)} batches] {elapsed:.0f}s  "
                   f"累计: {len(all_results)}")
 
     print(f"  模拟完成: +{sim_count} 条  (总累计 {len(all_results)})  "
@@ -293,15 +660,9 @@ def main():
     all_results = [r for r in all_results if r.get("总交易", 0) > 0]
     print(f"  剔除0交易: {before} → {len(all_results)}")
 
-    # Step 2: 从全量窗口子集计算熵权
-    full_window_results = [r for r in all_results if r["_window"] == "full"]
-    metrics_df = pd.DataFrame([
-        {"excess": r["超额收益 (%)"], "robust_sharpe": r["稳健夏普比率"],
-         "r_cubed": r["R立方"]}
-        for r in full_window_results
-    ])
-    weights = entropy_weights(metrics_df)
-    print(f"  熵权法权重: excess={weights['excess']:.3f}  "
+    # Step 2: 使用固定权重（来自校准配置，与 turtle_sweep.py 一致）
+    weights = get_scoring_weights(BASE_KWARGS["ts_code"])
+    print(f"  固定权重: excess={weights['excess']:.3f}  "
           f"robust_sharpe={weights['robust_sharpe']:.3f}  "
           f"r_cubed={weights['r_cubed']:.3f}")
 
@@ -353,7 +714,7 @@ def main():
         for r in group:
             if r["_window"].startswith("sim_"):
                 sc_label = r["_window"].replace("sim_", "")
-                prob = SCENARIO_PROBS.get(sc_label, 0.0)
+                prob = get_scenario_probs(BASE_KWARGS["ts_code"]).get(sc_label, 0.0)
                 if prob > 0:
                     sim_scores.append(r["score"] * prob)
                     sim_probs.append(prob)
@@ -465,4 +826,18 @@ def main():
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="海龟策略公平评分")
+    parser.add_argument("--ts-code", type=str, default="09992.HK",
+                        help=f"股票代码 (默认: 09992.HK)")
+    parser.add_argument("--workers", type=int, default=WORKERS,
+                        help=f"并行工作进程数 (默认: {WORKERS})")
+    parser.add_argument("--serial", action="store_true",
+                        help="强制串行执行（不使用多进程）")
+    args = parser.parse_args()
+    if args.serial:
+        WORKERS = 1
+    else:
+        WORKERS = max(1, args.workers)
+    init_config(args.ts_code)
     main()

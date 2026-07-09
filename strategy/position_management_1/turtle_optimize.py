@@ -329,7 +329,7 @@ def run_one_backtest(params: dict, base_kwargs: dict, df: pd.DataFrame,
         return None
     try:
         config = BacktestConfig(**{**base_kwargs, **params})
-        trades, equity, eq_dates = run_backtest(df.copy(), config)
+        trades, equity, eq_dates = run_backtest(df, config)
         stats = calc_stats(trades, config.initial_capital, equity, eq_dates,
                            benchmark_return=benchmark_return)
         if stats["总交易"] == 0:
@@ -347,7 +347,8 @@ def composite_score(stats: dict) -> float:
     r3 = min(stats.get("R立方", 0.0) or 0.0, 10.0)
     rs = stats.get("稳健夏普比率", 0.0) or 0.0
     excess = stats.get("超额收益 (%)", 0.0) or 0.0
-    return (excess + 20) / 60 * 50 + (rs + 2) / 8 * 40 + r3 / 10 * 10
+    return max(0.0, min(100.0,
+               (excess + 20) / 60 * 53.9 + (rs + 2) / 8 * 22.5 + r3 / 10 * 23.6))
 
 
 def compute_percentile_scores(results: list[dict]) -> list[dict]:
@@ -773,7 +774,8 @@ def part3_rolling_sim(df_base: pd.DataFrame,
     sim_dfs = {}
     sim_benchmarks = {}
     for label, trend_type in SCENARIO_LABEL_MAP.items():
-        df_sim = generate_ohlcv(sim_start, sim_days, last_price, trend_type)
+        df_sim = generate_ohlcv(sim_start, sim_days, last_price, trend_type,
+                                ts_code=BASE_KWARGS["ts_code"], market=BASE_KWARGS["market"])
         s_start = df_sim["Date"].min()
         if cached is not None and not cached.empty:
             hist = cached[cached["Date"] < s_start].copy()
@@ -957,102 +959,103 @@ def part1_global_search(df_base: pd.DataFrame):
 # ═══════════════════════════════════════════════════════════════
 
 def main():
-    print("╔══════════════════════════════════════════════════════════╗")
-    print("║  海龟交易法则 第十一章 最优化实验                        ║")
-    print("║  参数搜索空间与 grid_search_pm.py 完全一致              ║")
-    print("╚══════════════════════════════════════════════════════════╝\n")
-
-    print("📥 加载数据 ...")
-    config0 = BacktestConfig(**BASE_KWARGS)
-    df_base = fetch_data(
-        ts_code=config0.ts_code, stock_name=config0.stock_name,
-        market=config0.market, start_date=config0.start_date,
-        end_date=config0.end_date, exchange=config0.exchange,
-        data_source=config0.data_source,
-    )
-    df_base = compute_indicators(
-        df_base, entry_period=config0.entry_period,
-        exit_period=config0.exit_period, atr_period=config0.atr_period,
-        ema_fast=config0.ema_fast, ema_slow=config0.ema_slow,
-        channel_type=config0.channel_type, bb_period=config0.bb_period,
-        bb_k=config0.bb_k, am_ma_period=config0.am_ma_period,
-        mode=config0.mode,
-    )
-    print(f"   数据: {len(df_base)} 条\n")
-
-    # Part 1: 全量搜索
-    all_stats = part1_global_search(df_base)
-
-    # 用全局最优作为 Part 2 的起点
-    if all_stats:
-        global_best = all_stats[0]
-        DEFAULT_PARAMS.update({
-            "pm_grid_down": global_best["pm_grid_down"],
-            "pm_grid_up": global_best["pm_grid_up"],
-            "pm_reduce_pct": global_best["pm_reduce_pct"],
-            "pm_add_pct": global_best["pm_add_pct"],
-            "pm_agg_k": global_best["pm_agg_k"],
-        })
-        print(f"  📌 已用全局最优更新 DEFAULT_PARAMS: "
-              f"gd={DEFAULT_PARAMS['pm_grid_down']:.2f} "
-              f"gu={DEFAULT_PARAMS['pm_grid_up']:.2f} "
-              f"rp={DEFAULT_PARAMS['pm_reduce_pct']:.2f} "
-              f"ap={DEFAULT_PARAMS['pm_add_pct']:.2f} "
-              f"k={DEFAULT_PARAMS['pm_agg_k']:.2f}\n")
-
-    # Part 2: 单参数扫描
-    sweeps, greedy_params, second_best = part2_param_sweep(df_base)
-
-    # Part 3: 滚动窗口 + 模拟数据
-    part3_results = part3_rolling_sim(df_base, greedy_params, second_best,
-                                       part1_all_stats=all_stats)
-
-    # 保存
-    out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))), "result")
-    os.makedirs(out_dir, exist_ok=True)
-
-    if sweeps:
-        _plot_sweep_curves(sweeps, out_dir,
-                           filename="turtle_sweeps_part2.png",
-                           title="Part 2 收敛后 — 单参数扫描",
-                           base_params=sweeps.get("_base_params"))
-
-    if part3_results:
-        xlsx_path = os.path.join(out_dir, "turtle_rolling_sim.xlsx")
-        with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
-            if part3_results.get("window_details"):
-                pd.DataFrame(part3_results["window_details"]).to_excel(
-                    writer, sheet_name="每窗口明细", index=False)
-            if part3_results.get("final"):
-                pd.DataFrame(part3_results["final"],
-                             columns=["label", "params", "part1_score", "rolling_mean",
-                                     "sim_weighted", "combined", "p10"]).to_excel(
-                    writer, sheet_name="综合排名", index=False)
-
-        # ── Part 3 验证后：对综合排名 top 3 分别做单参数扫描 ──
-        if part3_results.get("final"):
-            bm = compute_buy_hold(df_base, BASE_KWARGS["pm_start_date"])
-            top3 = part3_results["final"][:3]
-            for rank, (label, params, p1, r_mean, sw, combined, p10) in enumerate(top3, 1):
-                print(f"\n  🔬 Top{rank} 单参数扫描: {label} "
-                      f"(gd={params['pm_grid_down']:.3f} gu={params['pm_grid_up']:.3f} "
-                      f"rp={params['pm_reduce_pct']:.3f} ap={params['pm_add_pct']:.3f} "
-                      f"k={params['pm_agg_k']:.3f})")
-                sweeps = _single_round_sweep(df_base, params, bm)
-                if sweeps:
-                    safe_label = label.replace("/", "_").replace(" ", "_")
-                    _plot_sweep_curves(sweeps, out_dir,
-                                       filename=f"turtle_sweeps_top{rank}_{safe_label}.png",
-                                       title=f"Top{rank} 单参数扫描 — {label} (综合={combined:.1f})",
-                                       base_params=sweeps.get("_base_params"))
-
-    if all_stats:
-        pd.DataFrame(all_stats).to_excel(
-            os.path.join(out_dir, "turtle_full_search.xlsx"), index=False)
-
-    print(f"\n📁 结果已保存: result/turtle_*.xlsx")
-    print("✅ 海龟第十一章实验完成！")
+    print("grid_search_pm.py已废弃")
+    # print("╔══════════════════════════════════════════════════════════╗")
+    # print("║  海龟交易法则 第十一章 最优化实验                        ║")
+    # print("║  参数搜索空间与 grid_search_pm.py 完全一致              ║")
+    # print("╚══════════════════════════════════════════════════════════╝\n")
+    #
+    # print("📥 加载数据 ...")
+    # config0 = BacktestConfig(**BASE_KWARGS)
+    # df_base = fetch_data(
+    #     ts_code=config0.ts_code, stock_name=config0.stock_name,
+    #     market=config0.market, start_date=config0.start_date,
+    #     end_date=config0.end_date, exchange=config0.exchange,
+    #     data_source=config0.data_source,
+    # )
+    # df_base = compute_indicators(
+    #     df_base, entry_period=config0.entry_period,
+    #     exit_period=config0.exit_period, atr_period=config0.atr_period,
+    #     ema_fast=config0.ema_fast, ema_slow=config0.ema_slow,
+    #     channel_type=config0.channel_type, bb_period=config0.bb_period,
+    #     bb_k=config0.bb_k, am_ma_period=config0.am_ma_period,
+    #     mode=config0.mode,
+    # )
+    # print(f"   数据: {len(df_base)} 条\n")
+    #
+    # # Part 1: 全量搜索
+    # all_stats = part1_global_search(df_base)
+    #
+    # # 用全局最优作为 Part 2 的起点
+    # if all_stats:
+    #     global_best = all_stats[0]
+    #     DEFAULT_PARAMS.update({
+    #         "pm_grid_down": global_best["pm_grid_down"],
+    #         "pm_grid_up": global_best["pm_grid_up"],
+    #         "pm_reduce_pct": global_best["pm_reduce_pct"],
+    #         "pm_add_pct": global_best["pm_add_pct"],
+    #         "pm_agg_k": global_best["pm_agg_k"],
+    #     })
+    #     print(f"  📌 已用全局最优更新 DEFAULT_PARAMS: "
+    #           f"gd={DEFAULT_PARAMS['pm_grid_down']:.2f} "
+    #           f"gu={DEFAULT_PARAMS['pm_grid_up']:.2f} "
+    #           f"rp={DEFAULT_PARAMS['pm_reduce_pct']:.2f} "
+    #           f"ap={DEFAULT_PARAMS['pm_add_pct']:.2f} "
+    #           f"k={DEFAULT_PARAMS['pm_agg_k']:.2f}\n")
+    #
+    # # Part 2: 单参数扫描
+    # sweeps, greedy_params, second_best = part2_param_sweep(df_base)
+    #
+    # # Part 3: 滚动窗口 + 模拟数据
+    # part3_results = part3_rolling_sim(df_base, greedy_params, second_best,
+    #                                    part1_all_stats=all_stats)
+    #
+    # # 保存
+    # out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    #     os.path.abspath(__file__)))), "result")
+    # os.makedirs(out_dir, exist_ok=True)
+    #
+    # if sweeps:
+    #     _plot_sweep_curves(sweeps, out_dir,
+    #                        filename="turtle_sweeps_part2.png",
+    #                        title="Part 2 收敛后 — 单参数扫描",
+    #                        base_params=sweeps.get("_base_params"))
+    #
+    # if part3_results:
+    #     xlsx_path = os.path.join(out_dir, "turtle_rolling_sim.xlsx")
+    #     with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
+    #         if part3_results.get("window_details"):
+    #             pd.DataFrame(part3_results["window_details"]).to_excel(
+    #                 writer, sheet_name="每窗口明细", index=False)
+    #         if part3_results.get("final"):
+    #             pd.DataFrame(part3_results["final"],
+    #                          columns=["label", "params", "part1_score", "rolling_mean",
+    #                                  "sim_weighted", "combined", "p10"]).to_excel(
+    #                 writer, sheet_name="综合排名", index=False)
+    #
+    #     # ── Part 3 验证后：对综合排名 top 3 分别做单参数扫描 ──
+    #     if part3_results.get("final"):
+    #         bm = compute_buy_hold(df_base, BASE_KWARGS["pm_start_date"])
+    #         top3 = part3_results["final"][:3]
+    #         for rank, (label, params, p1, r_mean, sw, combined, p10) in enumerate(top3, 1):
+    #             print(f"\n  🔬 Top{rank} 单参数扫描: {label} "
+    #                   f"(gd={params['pm_grid_down']:.3f} gu={params['pm_grid_up']:.3f} "
+    #                   f"rp={params['pm_reduce_pct']:.3f} ap={params['pm_add_pct']:.3f} "
+    #                   f"k={params['pm_agg_k']:.3f})")
+    #             sweeps = _single_round_sweep(df_base, params, bm)
+    #             if sweeps:
+    #                 safe_label = label.replace("/", "_").replace(" ", "_")
+    #                 _plot_sweep_curves(sweeps, out_dir,
+    #                                    filename=f"turtle_sweeps_top{rank}_{safe_label}.png",
+    #                                    title=f"Top{rank} 单参数扫描 — {label} (综合={combined:.1f})",
+    #                                    base_params=sweeps.get("_base_params"))
+    #
+    # if all_stats:
+    #     pd.DataFrame(all_stats).to_excel(
+    #         os.path.join(out_dir, "turtle_full_search.xlsx"), index=False)
+    #
+    # print(f"\n📁 结果已保存: result/turtle_*.xlsx")
+    # print("✅ 海龟第十一章实验完成！")
 
 
 if __name__ == "__main__":

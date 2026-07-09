@@ -129,4 +129,47 @@ def compute_indicators(
         df["ADX_DOWN"] = df["ADX14"] < df["ADX14"].shift(1)
         df["ADX_CROSS_DOWN_ADXR"] = (df["ADX14"] < df["ADXR"]) & (df["ADX14"].shift(1) >= df["ADXR"].shift(1))
 
+        # ADX 5日斜率（连续变量，替代二元 ADX_UP 用于趋势强度评分）
+        adx14 = df["ADX14"].values.astype(float)
+        adx_5d_ago = np.roll(adx14, 5)
+        adx_5d_ago[np.isnan(adx_5d_ago)] = adx14[np.isnan(adx_5d_ago)]
+        denom = np.where(np.abs(adx_5d_ago) > 0.1, np.abs(adx_5d_ago), 1.0)
+        df["ADX_SLOPE_5"] = (adx14 - adx_5d_ago) / denom
+
+    # ── 个股 DMI 基线：自动计算，供 _dmi_trend_area 自适应分区 ──
+    df.attrs["dmi_baseline"] = _compute_dmi_baseline(df)
+
     return df
+
+
+def _compute_dmi_baseline(df: pd.DataFrame) -> dict:
+    """从个股历史 DMI 数据自动计算分区阈值基线。
+
+    ADX_SLOPE_5 是归一化指标（ΔADX/|ADX_5d_ago|），分布跨个股一致，
+    slope_sep 使用硬编码 -0.05 即可。DI 价差分布有个股差异，di_gap 和 di_dir
+    用该个股自身的百分位数。
+
+    返回的 dict 存入 df.attrs["dmi_baseline"]，引擎 _dmi_trend_area()
+    自动读取，无需额外配置。
+    """
+    dmi_cols = ["ADX_SLOPE_5", "+DI", "-DI"]
+    available = [c for c in dmi_cols if c in df.columns]
+    if len(available) < 3:
+        return {}  # DMI 未计算，返回空
+
+    slope = df["ADX_SLOPE_5"].dropna()
+    plus_di = df["+DI"].dropna()
+    minus_di = df["-DI"].dropna()
+    di_abs = abs(plus_di - minus_di).dropna()
+
+    if len(slope) < 20 or len(di_abs) < 20:
+        return {}
+
+    return {
+        # ADX 斜率分界：归一化指标，-0.05 跨个股通用
+        "slope_sep": -0.05,
+        # DI 强势阈值：个股自身 P40，DI 价差大的个股自动调高门槛
+        "di_gap": round(float(di_abs.quantile(0.40)), 1),
+        # DI 方向阈值：个股自身 P20，敏感度与波动特征匹配
+        "di_dir": round(float(di_abs.quantile(0.20)), 1),
+    }

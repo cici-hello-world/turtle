@@ -87,7 +87,7 @@ class BacktestConfig:
     pm_agg_k: float = 0.6            # 震荡市激进倍数: gda=gd×k, gua=gu×k, rpa=rp+(1-k)×0.5
 
     # ========== 止盈与回本参数 ==========
-    pm_take_profit_ratio: float = 1.30  # 权益超过初始×该倍数后：仓位归零时停止交易，有仓位时全仓清仓
+    pm_take_profit_ratio: float = 100  # 权益超过初始×该倍数后：仓位归零时停止交易，有仓位时全仓清仓
 
     # ========== Position Management 2 参数（Swing 恢复仓位管理） ==========
     # 与 PM1 不同：PM2 做非对称 swing —— 反弹卖出、回落买回，靠波动差价摊薄成本

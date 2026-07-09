@@ -226,22 +226,132 @@ def _get_macro(ts_code: str) -> dict:
     return {"name": ts_code, "sector": "通用", **_GENERIC_MACRO}
 
 
-def estimate_probabilities(scores: dict, ts_code: str = "") -> dict:
-    """基于匹配得分 + 宏观定性判断，估算未来6个月各情景概率"""
-    sorted_scenarios = sorted(scores.items(), key=lambda x: x[1]["composite"], reverse=True)
-    macro = _get_macro(ts_code)
+def _scenario_signal_score(name: str, params: dict, features: dict) -> float:
+    """基于当前实时行情信号，评估某情景作为未来走势的合理程度。
 
-    # 基准概率 (通用)，个股特定的说明从 macro 映射
-    base_probs = {
-        "缓慢阴跌": 0.35,
-        "震荡向下": 0.20,
-        "横盘震荡": 0.15,
-        "V形反转": 0.10,
-        "震荡向上": 0.10,
-        "单边下跌": 0.05,
-        "倒V反转": 0.03,
-        "单边上涨": 0.02,
-    }
+    不是历史模式匹配，而是从"当前位置 + 情景方向 + 波动特征"的契合度打分。
+    """
+    slope = features["daily_slope"] / 100   # 转回小数
+    vol = features["daily_vol"] / 100
+    up_ratio = features["up_ratio"] / 100
+    max_dd = features["max_dd"] / 100
+    total_chg = features["total_chg"] / 100
+
+    score = 1.0  # 基础分
+
+    # ── 1. 方向契合度 ──
+    # 情景的未来方向 vs 当前动量：当前方向与情景终点方向越一致，延续该路径越自然
+    scenario_slope = params["slope"]
+    if scenario_slope > 0.0005:       # 情景终点向上
+        if slope > 0.0005:
+            score *= 1.3               # 顺势：当前向上 → 未来继续向上，自然
+        elif slope < -0.0005:
+            score *= 0.5               # 逆势：当前下跌 → 要翻转为上涨，需更大能量
+        else:
+            score *= 0.85
+    elif scenario_slope < -0.0005:    # 情景终点向下
+        if slope < -0.0005:
+            score *= 1.3
+        elif slope > 0.0005:
+            score *= 0.5
+        else:
+            score *= 0.85
+    else:                              # 情景终点横盘
+        score *= 1.1 if abs(slope) < 0.001 else 0.8
+
+    # ── 2. 波动率契合度 ──
+    # 情景的典型波动 vs 当前波动：当前波动越接近情景特征，越可能延续
+    scenario_noise = params["noise"]
+    vol_ratio = vol / scenario_noise if scenario_noise > 0 else 1.0
+    if 0.5 <= vol_ratio <= 2.0:
+        score *= 1.15                  # 波动率匹配
+    elif vol_ratio > 3.0:
+        score *= 0.7                   # 当前波动远超情景特征
+
+    # ── 3. V形/倒V 的特殊前置条件 ──
+    if name == "V形反转":
+        # V形需要前期已发生较大回撤（才有反弹空间）
+        if max_dd < -0.15:
+            score *= 1.5               # 深度回调后 V 形反转更可信
+        elif max_dd < -0.08:
+            score *= 1.15
+        else:
+            score *= 0.6               # 没怎么跌，V形前提不成立
+    if name == "倒V反转":
+        # 倒V需要前期已有较大涨幅（才有回落空间）
+        if total_chg > 0.20:
+            score *= 1.5
+        elif total_chg > 0.10:
+            score *= 1.15
+        else:
+            score *= 0.6
+
+    # ── 4. 单边趋势需要低波动配合 ──
+    if name in ("单边上涨", "单边下跌"):
+        if vol < 0.018:
+            score *= 1.2               # 低波动有利于趋势延续
+        elif vol > 0.035:
+            score *= 0.7               # 高波动不利于单边趋势
+
+    # ── 5. 震荡情景需要高波动 ──
+    if name in ("震荡向上", "震荡向下"):
+        if vol > 0.025:
+            score *= 1.15
+        elif vol < 0.014:
+            score *= 0.8
+
+    # ── 6. 横盘震荡：当前波动适中 + 方向不明 ──
+    if name == "横盘震荡":
+        if abs(slope) < 0.0008 and 0.012 < vol < 0.025:
+            score *= 1.25
+        elif abs(slope) > 0.002:
+            score *= 0.7
+
+    # ── 7. 缓慢阴跌：方向略偏下 + 低波动 ──
+    if name == "缓慢阴跌":
+        if slope < 0 and vol < 0.02:
+            score *= 1.2
+        elif slope > 0.001:
+            score *= 0.7
+
+    return score
+
+
+def estimate_probabilities(scores: dict, ts_code: str = "",
+                           features: dict = None) -> dict:
+    """基于当前行情走势 + 宏观环境实时推测未来6个月各情景概率。
+
+    不使用历史模式匹配。信号来自 features（近期的趋势、波动、回撤），
+    宏观来自 STOCK_MACRO 的个股定性背景。
+    """
+    macro = _get_macro(ts_code)
+    sorted_by_match = sorted(scores.items(), key=lambda x: x[1]["composite"], reverse=True)
+
+    # ── 从实时信号计算各情景得分 ──
+    if features:
+        raw_scores = {}
+        for name, params in SCENARIOS.items():
+            raw_scores[name] = _scenario_signal_score(name, params, features)
+
+        # ── 宏观调整：根据个股背景微调 ±20% ──
+        macro_bias = {
+            "缓慢阴跌": 1.05, "震荡向下": 1.05, "横盘震荡": 1.0,
+            "V形反转": 0.95, "震荡向上": 1.0, "单边下跌": 0.95,
+            "倒V反转": 0.95, "单边上涨": 0.95,
+        }
+        for name in raw_scores:
+            raw_scores[name] *= macro_bias.get(name, 1.0)
+
+        # ── softmax 转概率 ──
+        temp = 0.3
+        exp_scores = {k: np.exp(v / temp) for k, v in raw_scores.items()}
+        total = sum(exp_scores.values())
+        probs = {k: round(v / total, 4) for k, v in exp_scores.items()}
+    else:
+        # 无 features 时退化为等权
+        probs = {k: round(1.0 / len(SCENARIOS), 4) for k in SCENARIOS}
+
+    probs = dict(sorted(probs.items(), key=lambda x: x[1], reverse=True))
 
     note_key = {
         "缓慢阴跌": macro.get("slow_grind", ""),
@@ -254,21 +364,18 @@ def estimate_probabilities(scores: dict, ts_code: str = "") -> dict:
         "单边上涨": macro.get("up", ""),
     }
 
-    probs = {k: base_probs.get(k, 0.0) for k, _ in sorted_scenarios}
-    probs = dict(sorted(probs.items(), key=lambda x: x[1], reverse=True))
-
     down = sum(v for k, v in probs.items() if "跌" in k or "倒V" in k)
     side = sum(v for k, v in probs.items() if "震荡" in k or "横盘" in k)
     up = sum(v for k, v in probs.items() if "涨" in k or ("V" in k and "倒" not in k))
 
     return {
         "probs": probs,
-        "macro_notes": note_key,  # 个股定制的场景说明
+        "macro_notes": note_key,
         "stock_name": macro.get("name", ts_code),
         "sector": macro.get("sector", ""),
         "summary": {"down": down, "sideways": side, "up": up},
-        "top_match": sorted_scenarios[0][0],
-        "second_match": sorted_scenarios[1][0] if len(sorted_scenarios) > 1 else None,
+        "top_match": sorted_by_match[0][0],
+        "second_match": sorted_by_match[1][0] if len(sorted_by_match) > 1 else None,
     }
 
 
@@ -546,29 +653,63 @@ def print_historical_report(ts_code: str, df: pd.DataFrame,
               f" ({future_ret:+.0f}%)")
 
 
+class _Tee:
+    """同时输出到终端和文件。"""
+    def __init__(self, filepath: str):
+        self.terminal = sys.stdout
+        self.log = open(filepath, "w", encoding="utf-8")
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
+    def close(self):
+        self.log.close()
+
+
 def main():
     ts_code = sys.argv[1] if len(sys.argv) > 1 else "02015.HK"
     start_date = sys.argv[2] if len(sys.argv) > 2 else "2025-10-01"
     mode = sys.argv[3] if len(sys.argv) > 3 else "full"
 
-    df = load_data(ts_code)
+    # ── 输出文件 ──
+    out_dir = Path(__file__).parent.parent.parent / "result"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report_path = out_dir / f"scenario_analysis_{ts_code}_{pd.Timestamp.today().strftime('%Y%m%d')}.txt"
+    tee = _Tee(str(report_path))
+    original_stdout = sys.stdout
+    sys.stdout = tee
 
-    # ── 形态匹配 + 概率估算 ──
-    if mode in ("full", "scenario"):
-        result = match_scenarios(df, start_date)
-        if result:
-            estimates = estimate_probabilities(result["scores"], ts_code)
-            print_report(ts_code, result, estimates)
+    try:
+        df = load_data(ts_code)
 
-    # ── 历史区间匹配 ──
-    if mode in ("full", "history"):
-        result = match_scenarios(df, start_date)
-        if result:
-            estimates = estimate_probabilities(result["scores"], ts_code)
-            matches = find_historical_match(df, estimates,
-                                            exclude_after=start_date)
-            print()
-            print_historical_report(ts_code, df, estimates, matches)
+        # ── 形态匹配 + 概率估算 ──
+        if mode in ("full", "scenario"):
+            result = match_scenarios(df, start_date)
+            if result:
+                estimates = estimate_probabilities(result["scores"], ts_code,
+                                                   features=result["features"])
+                print_report(ts_code, result, estimates)
+
+        # ── 历史区间匹配 ──
+        if mode in ("full", "history"):
+            result = match_scenarios(df, start_date)
+            if result:
+                estimates = estimate_probabilities(result["scores"], ts_code,
+                                                   features=result["features"])
+                matches = find_historical_match(df, estimates,
+                                                exclude_after=start_date)
+                print()
+                print_historical_report(ts_code, df, estimates, matches)
+
+        print(f"\n📁 报告已保存: {report_path}")
+    finally:
+        sys.stdout = original_stdout
+        tee.close()
 
 
 if __name__ == "__main__":
