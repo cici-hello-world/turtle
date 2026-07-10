@@ -43,7 +43,8 @@ import os
 # ═══════════════════════════════════════════════════════════════
 # 配置 — key 为 ts_code，通过 init_config(ts_code) 激活
 # ═══════════════════════════════════════════════════════════════
-
+TRADING_DAYS = 252  # 约1年交易日
+stock_dir = None
 _ALL_BASE_KWARGS = {
     "06181.HK": dict(  # 老铺
         ts_code="06181.HK", stock_name="老铺", market="HK",
@@ -77,12 +78,21 @@ _ALL_BASE_KWARGS = {
         pm_dynamic_position=False, pm_adaptive_grid=False,
         per_shares=100, data_source="akshare",
     ),
+    "01810.HK": dict(  # 小米
+        ts_code="01810.HK", stock_name="小米", market="HK",
+        mode="position_management_1", pm_start_date="20260629",
+        ema_slow=0, ema_fast=0, pm_initial_shares=8,
+        initial_capital=40000, user_dmi=True,
+        pm_dynamic_position=False, pm_adaptive_grid=False,
+        per_shares=100, data_source="akshare",
+    ),
+
 }
 
 _ALL_BEST_PARAMS = {
     "06181.HK": dict(  # 老铺
-        pm_grid_down=0.09, pm_grid_up=0.09, pm_reduce_pct=0.10,
-        pm_add_pct=0.10, pm_adx_threshold=25, pm_agg_k=0.57,
+        pm_grid_down=0.075, pm_grid_up=0.07, pm_reduce_pct=0.38,
+        pm_add_pct=0.25, pm_adx_threshold=32, pm_agg_k=1,
     ),
     "02015.HK": dict(  # 理想
         pm_grid_down=0.095, pm_grid_up=0.07, pm_reduce_pct=0.35,
@@ -95,6 +105,10 @@ _ALL_BEST_PARAMS = {
     "03690.HK": dict(  # 美团
         pm_grid_down=0.10, pm_grid_up=0.036, pm_reduce_pct=0.53,
         pm_add_pct=0.51, pm_adx_threshold=35, pm_agg_k=1,
+    ),
+    "01810.HK": dict(  # 小米
+        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.69,
+        pm_add_pct=0.33, pm_adx_threshold=26, pm_agg_k=1,
     ),
 }
 
@@ -114,7 +128,7 @@ def init_config(ts_code: str):
     BEST_PARAMS = _ALL_BEST_PARAMS[ts_code]
 
 
-TRADING_DAYS = 252  # 约1年交易日
+
 
 
 def get_last_price() -> float:
@@ -425,7 +439,7 @@ def get_last_price_for_stock(ts_code: str, market: str) -> tuple:
 
 
 def generate_stock_simulations(ts_code: str, market: str,
-                                trading_days: int = 252,
+                                trading_days: int = TRADING_DAYS, # 约1年交易日,
                                 start_date: str = None) -> dict:
     """为单只股票生成所有 8 种场景的未来模拟K线。
 
@@ -708,6 +722,8 @@ if __name__ == "__main__":
 
     # 3. 保存模拟K线
     ts_code = BASE_KWARGS["ts_code"]
+    stock_dir = os.path.join("result/simulated_klines", ts_code)
+    os.makedirs(stock_dir, exist_ok=True)
     save_simulations(sim_data, ts_code)
 
     if args.no_backtest:

@@ -57,7 +57,7 @@ _ALL_BASE_KWARGS = {
         ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
         mode="position_management_1", per_shares=200,
         start_date="20201211", pm_start_date="20210112",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=2, initial_capital=40000,
         data_source="tushare",
@@ -80,6 +80,25 @@ _ALL_BASE_KWARGS = {
         pm_initial_shares=25, initial_capital=40000,
         data_source="akshare",
     ),
+    "06181.HK": dict(  # 老铺
+        ts_code="06181.HK",stock_name="老铺",market="HK",
+        mode="position_management_1",per_shares=100,
+        pm_start_date="20240729",start_date="20240628",
+        user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
+        pm_dynamic_position=False,ema_fast=0,ema_slow=0,
+        pm_initial_shares=3,initial_capital=40000,
+        data_source="akshare",
+    ),
+    "01810.HK": dict(  # 小米
+        ts_code="01810.HK", stock_name="小米", market="HK",
+        mode="position_management_1",
+        pm_start_date="20180806", start_date="20180709",
+        user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
+        pm_dynamic_position=False,ema_fast=0,ema_slow=0,
+        pm_initial_shares=8, initial_capital=40000,
+        data_source="akshare",
+    ),
+
 }
 
 _ALL_SWEEP_RANGES = {
@@ -97,7 +116,7 @@ _ALL_SWEEP_RANGES = {
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
         "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
         "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        "pm_agg_k": [ 1.0],
     },
     "02015.HK": {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
@@ -105,7 +124,23 @@ _ALL_SWEEP_RANGES = {
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
         "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
         "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        "pm_agg_k": [ 1.0],
+    },
+    "01810.HK": {
+        "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
+        "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
+        "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
+        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+        "pm_adx_threshold": [25, 30, 35],
+        "pm_agg_k": [ 1.0],
+    },
+    "06181.HK": {
+        "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
+        "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
+        "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
+        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+        "pm_adx_threshold": [25, 30, 35],
+        "pm_agg_k": [ 1.0],
     },
 }
 
@@ -142,7 +177,7 @@ SCORING_WEIGHTS = {
     "09992.HK": dict(excess=0.4201, robust_sharpe=0.2188, r_cubed=0.3611),  # 泡泡玛特
     "01810.HK": dict(excess=0.3461, robust_sharpe=0.3455, r_cubed=0.3084),  # 小米
     "06181.HK": dict(excess=0.2767, robust_sharpe=0.2209, r_cubed=0.5024),  # 老铺
-    "03690.HK": dict(excess=0.361, robust_sharpe=0.207, r_cubed=0.4319),    # 美团
+    "03690.HK": dict(excess=0.4086, robust_sharpe=0.3499, r_cubed=0.2415),    # 美团
 }
 
 
@@ -793,13 +828,15 @@ def main():
     out_dir = os.path.join(PROJECT_ROOT, "result")
     os.makedirs(out_dir, exist_ok=True)
 
-    xlsx_path = os.path.join(out_dir, "turtle_scoring_result.xlsx")
+    ts_code_clean = BASE_KWARGS["ts_code"].replace(".", "_")
+
+    xlsx_path = os.path.join(out_dir, f"turtle_scoring_result_{ts_code_clean}.xlsx")
     df_summary = pd.DataFrame(summary)
     df_summary.to_excel(xlsx_path, sheet_name="综合排名", index=False)
     print(f"\n📁 综合排名: {xlsx_path} ({len(summary)} 组)")
 
     # 每窗口明细
-    detail_path = os.path.join(out_dir, "turtle_scoring_detail.xlsx")
+    detail_path = os.path.join(out_dir, f"turtle_scoring_detail_{ts_code_clean}.xlsx")
     detail_rows = []
     for r in all_results:
         p = r["_params"]

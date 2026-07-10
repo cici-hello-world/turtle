@@ -61,6 +61,9 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
     """
     try:
         end_date = pd.Timestamp.today().strftime("%Y%m%d")
+        if pd.Timestamp.now().hour < 20:
+            # 晚上8点之后才拉取当前的，否则值拉取到前一天
+            end_date = (pd.Timestamp.today() - pd.DateOffset(days=1)).strftime("%Y%m%d")
         df = fetch_data(
             ts_code=config.ts_code,
             stock_name=config.stock_name,

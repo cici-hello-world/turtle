@@ -363,17 +363,71 @@ def load_calibration(filepath: str) -> dict:
 # CLI — 独立运行校准
 # ═══════════════════════════════════════════════════════════════
 
+# 配置 — key 为 ts_code，通过 init_config(ts_code) 激活
+_ALL_BASE_KWARGS = {
+    "09992.HK": dict(  # 泡泡玛特
+        ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
+        mode="position_management_1", per_shares=200,
+        start_date="20201211", pm_start_date="20210112",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=2, initial_capital=40000,
+        data_source="tushare",
+    ),
+    "03690.HK": dict(  # 美团
+        ts_code="03690.HK", stock_name="美团", market="HK",
+        mode="position_management_1", per_shares=100,
+        start_date="20181023", pm_start_date="20180920",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=2, initial_capital=40000,
+        data_source="tushare",
+    ),
+    "02015.HK": dict(  # 理想
+        ts_code="02015.HK", stock_name="理想", market="HK",
+        mode="position_management_1", per_shares=100,
+        start_date="20220813", pm_start_date="20220913",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=25, initial_capital=40000,
+        data_source="akshare",
+    ),
+    "06181.HK": dict(  # 老铺
+        ts_code="06181.HK", stock_name="老铺", market="HK",
+        mode="position_management_1", per_shares=100,
+        start_date="20240628", pm_start_date="20240729",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=3, initial_capital=40000,
+        data_source="akshare",
+    ),
+    "01810.HK": dict(  # 小米
+        ts_code="01810.HK", stock_name="小米", market="HK",
+        mode="position_management_1",
+        start_date="20180709", pm_start_date="20180806",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=8, initial_capital=40000,
+        data_source="akshare",
+    ),
+}
+
+BASE_KWARGS = None
+
+
+def init_config(ts_code: str):
+    """根据 ts_code 激活对应的 BASE_KWARGS。"""
+    global BASE_KWARGS
+    if ts_code not in _ALL_BASE_KWARGS:
+        raise KeyError(f"未配置 {ts_code} 的 BASE_KWARGS，请在 _ALL_BASE_KWARGS 中添加")
+    BASE_KWARGS = _ALL_BASE_KWARGS[ts_code]
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(
         description="评分体系校准 — 全域随机采样 → 熵权 + 分位数阈值")
     parser.add_argument("--ts-code", default="09992.HK", help="股票代码")
-    parser.add_argument("--stock-name", default="泡泡玛特", help="股票名称")
-    parser.add_argument("--market", default="HK", help="市场 (HK/A)")
-    parser.add_argument("--start-date", default="20201211",
-                        help="数据起始日期 YYYYMMDD")
-    parser.add_argument("--pm-start-date", default="20210112",
-                        help="仓位管理起始日期 YYYYMMDD")
     parser.add_argument("--n-samples", type=int, default=500,
                         help="LHS 采样数量 (默认: 500)")
     parser.add_argument("--workers", type=int,
@@ -384,14 +438,10 @@ def main():
                         help="输出 JSON 路径 (默认: result/calibration_{ts_code}.json)")
     parser.add_argument("--param-space", default=None,
                         help="自定义参数空间 JSON 文件路径")
-    parser.add_argument("--data-source", default="tushare",
-                        help="数据源 (tushare/akshare)")
-    parser.add_argument("--pm-adaptive-grid", type=bool, default=True,
-                        help="是否启用自适应网格")
-    parser.add_argument("--per-shares", type=int, default=200, help="每手股数")
-    parser.add_argument("--initial-capital", type=float, default=40000,
-                        help="初始资金")
     args = parser.parse_args()
+
+    # ── 激活配置 ──
+    init_config(args.ts_code)
 
     # ── 加载自定义参数空间 ──
     param_space = None
@@ -401,17 +451,7 @@ def main():
             param_space = {k: tuple(v) for k, v in raw.items()}
 
     # ── 加载数据 ──
-    base_kwargs = dict(
-        ts_code=args.ts_code, stock_name=args.stock_name,
-        market=args.market, mode="position_management_1",
-        per_shares=args.per_shares,
-        start_date=args.start_date, pm_start_date=args.pm_start_date,
-        user_dmi=True, pm_adaptive=True,
-        pm_adaptive_grid=args.pm_adaptive_grid,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=2, initial_capital=args.initial_capital,
-        data_source=args.data_source,
-    )
+    base_kwargs = copy.deepcopy(BASE_KWARGS)
 
     config0 = BacktestConfig(**base_kwargs)
     df_base = fetch_data(
@@ -429,7 +469,7 @@ def main():
     )
 
     # 买入持有基准收益
-    mask = df_base["Date"] >= args.pm_start_date
+    mask = df_base["Date"] >= BASE_KWARGS["pm_start_date"]
     close = df_base.loc[mask, "Close"]
     bm = round((close.iloc[-1] / close.iloc[0] - 1) * 100, 2) if len(close) >= 2 else 0.0
     print(f"  数据: {len(df_base)} 条, 买入持有基准: {bm:+.2f}%")

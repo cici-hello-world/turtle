@@ -146,6 +146,42 @@ def _dmi_trend_area(row, config, direction: str = "long",
     return _trend_area
 
 
+# ── 自适应网格的个股经验常量（基于20日forward收益 + 波动率实证）──
+# zone_score: A/D/C 区 → blend 映射值，越高越积极
+# vol_base: ADX=30 时的基准 ATR/Close
+# vol_adx_slope: ADX 每偏离30多少点 → vol_threshold 调 0.01（越大=越不敏感）
+# vol_div: vol_adj 归一化除数（≈该股票 vol 的 std）
+# 默认值来自 09992.HK 泡泡玛特，其他股票按需覆盖
+_STOCK_GRID_CONSTANTS = {
+    "09992.HK": dict(  # 泡泡玛特
+        zone_score={"A": 1.0, "D": 0.65, "C": 0.30},
+        vol_base=0.05, vol_adx_slope=600.0, vol_div=0.08,
+    ),
+    "03690.HK": dict(  # 美团 — D区+1.34% C区-0.32%，D远弱于泡泡玛特
+        zone_score={"A": 1.0, "D": 0.40, "C": 0.25},
+        vol_base=0.047, vol_adx_slope=1200.0, vol_div=0.028,
+    ),
+    "06181.HK": dict(  # 老铺 — A区+29% D区+7.7% C区-0.97%，A极强但D也不弱
+        zone_score={"A": 1.0, "D": 0.45, "C": 0.25},
+        vol_base=0.061, vol_adx_slope=1200.0, vol_div=0.025,
+    ),
+    "01810.HK": dict(  # 小米 — A区+3.4% D区+1.8% C区-0.82%，与泡泡玛特格局接近
+        zone_score={"A": 1.0, "D": 0.65, "C": 0.25},
+        vol_base=0.040, vol_adx_slope=1200.0, vol_div=0.020,
+    ),
+    "02015.HK": dict(  # 理想 — A区-1.65% D区+0.68% C区-0.33%，DMI区制预测力弱
+        zone_score={"A": 0.45, "D": 0.50, "C": 0.25},
+        vol_base=0.048, vol_adx_slope=1200.0, vol_div=0.029,
+    ),
+}
+
+
+def _get_grid_constants(ts_code: str) -> dict:
+    """获取个股自适应网格常量，未配置的股票返回默认值（09992.HK）。"""
+    return _STOCK_GRID_CONSTANTS.get(
+        ts_code, _STOCK_GRID_CONSTANTS["09992.HK"])
+
+
 def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[float, float, float]:
     """根据今日 DMI 状态与波动率计算有效网格 (eff_down, eff_up, eff_reduce)。
 
@@ -203,21 +239,19 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
     # ── 波动率微调（高波动略放宽防假突破，基于ADX自校准阈值）──
     atr = row.get("ATR", 0)
     close = row.get("Close", 0)
+    gc = _get_grid_constants(config.ts_code)
     if atr > 0 and close > 0:
         vol = atr / close
-        vol_threshold = 0.05 + (adx - 30.0) / 600.0
-        vol_adj = (vol - vol_threshold) / 0.08
+        vol_threshold = gc["vol_base"] + (adx - 30.0) / gc["vol_adx_slope"]
+        vol_adj = (vol - vol_threshold) / gc["vol_div"]
         vol_adj = min(max(vol_adj, -0.10), 0.10)
     else:
         vol_adj = 0.0
 
     # ── 双方向区制映射（分值基于20日forward收益实证）──
-    # long: A(+4.8%/胜59%) > D(+3.3%/胜54%) > C(+0.6%/胜48%)
-    # short: A/B(下跌确认,收益低)得分高→压低blend; C(下跌酝酿,收益+3.8%)得分低
-    # 得分越高=趋势越确认, long得分↑→blend↑(积极), short得分↑→blend↓(防守)
-    zone_score = {"A": 1.0, "D": 0.65, "C": 0.30}
-    long_score = zone_score.get(area_long, 0.30)
-    short_score = zone_score.get(area_short, 0.30)
+    zone_score = gc["zone_score"]
+    long_score = zone_score.get(area_long, zone_score["C"])
+    short_score = zone_score.get(area_short, zone_score["C"])
     # zone_blend: short打5折避免同区抵消，LD/SD(0.32) > LC/SC(0.15)有区分
     zone_blend = max(long_score - short_score * 0.5, 0.0)
 

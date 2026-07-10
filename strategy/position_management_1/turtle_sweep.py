@@ -45,7 +45,7 @@ _ALL_BASE_KWARGS = {
         ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
         mode="position_management_1", per_shares=200,
         start_date="20201211", pm_start_date="20210112",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=2, initial_capital=40000, pm_agg_k=1.0,
         data_source="tushare",
@@ -68,21 +68,47 @@ _ALL_BASE_KWARGS = {
         pm_initial_shares=25, initial_capital=40000,
         data_source="akshare",
     ),
+    "06181.HK": dict(  # 老铺
+            ts_code="06181.HK",stock_name="老铺",market="HK",
+            mode="position_management_1",per_shares=100,
+            pm_start_date="20240729",start_date="20240628",
+            user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
+            pm_dynamic_position=False,ema_fast=0,ema_slow=0,
+            pm_initial_shares=3,initial_capital=40000,
+            data_source="akshare",
+        ),
+    "01810.HK": dict(  # 小米
+        ts_code="01810.HK", stock_name="小米", market="HK",
+        mode="position_management_1",
+        pm_start_date="20180806", start_date="20180709",
+        user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
+        pm_dynamic_position=False,ema_fast=0,ema_slow=0,
+        pm_initial_shares=8, initial_capital=40000,
+        data_source="akshare",
+    ),
 }
 
 _ALL_OPTIMAL_PARAMS = {
     "09992.HK": dict(  # 泡泡玛特
-        pm_grid_down=0.105, pm_grid_up=0.075, pm_reduce_pct=0.570,
-        pm_add_pct=0.45, pm_adx_threshold=21,
+        pm_grid_down=0.10, pm_grid_up=0.05, pm_reduce_pct=0.6,
+        pm_add_pct=0.5, pm_adx_threshold=30,
         pm_agg_k=0.66,
     ),
     "03690.HK": dict(  # 美团
-        pm_grid_down=0.10, pm_grid_up=0.036, pm_reduce_pct=0.53,
-        pm_add_pct=0.51, pm_adx_threshold=35, pm_agg_k=1,
+        pm_grid_down=0.10, pm_grid_up=0.04, pm_reduce_pct=0.60,
+        pm_add_pct=0.50, pm_adx_threshold=35, pm_agg_k=1,
     ),
     "02015.HK": dict(  # 理想
         pm_grid_down=0.12, pm_grid_up=0.03, pm_reduce_pct=0.60,
         pm_add_pct=0.30, pm_adx_threshold=35, pm_agg_k=1,
+    ),
+    "06181.HK": dict(  # 老铺
+        pm_grid_down=0.075, pm_grid_up=0.07, pm_reduce_pct=0.38,
+        pm_add_pct=0.25, pm_adx_threshold=32, pm_agg_k=1,
+    ),
+    "01810.HK": dict(  # 小米
+        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.69,
+        pm_add_pct=0.33, pm_adx_threshold=26, pm_agg_k=1,
     ),
 }
 
@@ -514,6 +540,7 @@ def main():
         param_changed = False
         all_sweeps = {}
         all_summaries = {}
+        all_scored = {}
 
         for pname, pdef in SWEEP_DEFS.items():
             sweep_vals = pdef["values"]
@@ -601,10 +628,12 @@ def main():
         else:
             print(f"\n[{_now()}] ⚠️ 最优参数已改变，重新扫描全部参数...")
 
+    ts_code_clean = BASE_KWARGS["ts_code"].replace(".", "_")
+
     # ── 最终绘图：5张图合并为一个文件 ──
     _plot_sweep_curves(
         all_sweeps, out_dir,
-        filename="turtle_sweep_all.png",
+        filename=f"turtle_sweep_all_{ts_code_clean}.png",
         title=f"单参数扫描 — 收敛后 (gd={OPTIMAL_PARAMS['pm_grid_down']:.3f} "
               f"gu={OPTIMAL_PARAMS['pm_grid_up']:.3f} "
               f"rp={OPTIMAL_PARAMS['pm_reduce_pct']:.3f} "
@@ -613,8 +642,65 @@ def main():
         base_params=OPTIMAL_PARAMS,
     )
 
+    # ── 保存最优参数三窗口明细 Excel ──
+    target_params = {p: OPTIMAL_PARAMS[p] for p in SWEEP_DEFS}
+    optimal_results = [r for r in scored_results
+                       if all(r["_params"].get(p, 0) == target_params[p]
+                              for p in SWEEP_DEFS)]
+
+    _DETAIL_COLS = [
+        ("窗口", "_window"),
+        ("综合得分", "score"),
+        ("超额收益 (%)", "excess"),
+        ("稳健夏普比率", "robust_sharpe"),
+        ("R立方", "r_cubed"),
+        ("CAGR (%)", "CAGR (%)"),
+        ("最大回撤 (%)", "最大回撤 (%)"),
+        ("总收益率 (%)", "总收益率 (%)"),
+        ("夏普比率", "夏普比率"),
+        ("胜率 (%)", "胜率 (%)"),
+        ("总交易", "总交易"),
+        ("R平方", "R平方"),
+        ("MAR比率", "MAR比率"),
+    ]
+
+    def _build_detail_sheet(rows):
+        data = []
+        for r in rows:
+            row_data = {}
+            # 最优参数组合
+            for pname in SWEEP_DEFS:
+                row_data[SWEEP_DEFS[pname]["label"]] = OPTIMAL_PARAMS[pname]
+            for label, key in _DETAIL_COLS:
+                val = r.get(key)
+                row_data[label] = round(val, 4) if isinstance(val, float) else val
+            data.append(row_data)
+        return pd.DataFrame(data)
+
+    detail_file = f"turtle_optimal_details_{ts_code_clean}.xlsx"
+    with pd.ExcelWriter(os.path.join(out_dir, detail_file),
+                        engine="openpyxl") as detail_writer:
+        full_rows = [r for r in optimal_results if r["_window"] == "full"]
+        rolling_rows = sorted(
+            [r for r in optimal_results if r["_window"].startswith("rolling_")],
+            key=lambda r: r["_window"])
+        sim_rows = [r for r in optimal_results if r["_window"].startswith("sim_")]
+
+        if full_rows:
+            _build_detail_sheet(full_rows).to_excel(
+                detail_writer, sheet_name="全量历史", index=False)
+        if rolling_rows:
+            _build_detail_sheet(rolling_rows).to_excel(
+                detail_writer, sheet_name="滚动窗口", index=False)
+        if sim_rows:
+            _build_detail_sheet(sim_rows).to_excel(
+                detail_writer, sheet_name="场景模拟", index=False)
+
+    print(f"  最优参数明细: result/{detail_file} "
+          f"(全量{len(full_rows)} 滚动{len(rolling_rows)} 场景{len(sim_rows)})")
+
     # ── 保存 Excel（所有参数汇总到一个文件）──
-    with pd.ExcelWriter(os.path.join(out_dir, "turtle_sweep_all.xlsx"),
+    with pd.ExcelWriter(os.path.join(out_dir, f"turtle_sweep_all_{ts_code_clean}.xlsx"),
                         engine="openpyxl") as writer:
         for pname, summary in all_summaries.items():
             label = SWEEP_DEFS[pname]["label"]
@@ -627,8 +713,8 @@ def main():
           f"rp={OPTIMAL_PARAMS['pm_reduce_pct']:.3f}  "
           f"ap={OPTIMAL_PARAMS['pm_add_pct']:.3f}  "
           f"adx={int(OPTIMAL_PARAMS['pm_adx_threshold'])}")
-    print(f"  图表: result/turtle_sweep_all.png")
-    print(f"  Excel: result/turtle_sweep_all.xlsx")
+    print(f"  图表: result/turtle_sweep_all_{ts_code_clean}.png")
+    print(f"  Excel: result/turtle_sweep_all_{ts_code_clean}.xlsx")
 
 
 if __name__ == "__main__":
