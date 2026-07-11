@@ -99,12 +99,12 @@ _ALL_BEST_PARAMS = {
         pm_add_pct=0.30, pm_adx_threshold=25, pm_agg_k=1,
     ),
     "09992.HK": dict(  # 泡泡玛特
-        pm_grid_down=0.105, pm_grid_up=0.075, pm_reduce_pct=0.570,
-        pm_add_pct=0.45, pm_adx_threshold=21, pm_agg_k=0.66,
+        pm_grid_down=0.085, pm_grid_up=0.075, pm_reduce_pct=0.65,
+        pm_add_pct=0.52, pm_adx_threshold=21, pm_agg_k=0.66,
     ),
     "03690.HK": dict(  # 美团
-        pm_grid_down=0.10, pm_grid_up=0.036, pm_reduce_pct=0.53,
-        pm_add_pct=0.51, pm_adx_threshold=35, pm_agg_k=1,
+        pm_grid_down=0.10, pm_grid_up=0.027, pm_reduce_pct=0.57,
+        pm_add_pct=0.52, pm_adx_threshold=35, pm_agg_k=1,
     ),
     "01810.HK": dict(  # 小米
         pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.69,

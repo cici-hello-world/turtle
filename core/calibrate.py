@@ -39,8 +39,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from core.config import BacktestConfig
 from core.data import fetch_data
 from core.indicators import compute_indicators
-from core.scoring import entropy_weights
-
+from core.scoring import entropy_weights, compute_weights
 
 # ── 默认可行参数空间 ──
 # 边界足够宽，覆盖所有合理的参数组合
@@ -222,7 +221,7 @@ def calibrate(base_kwargs: dict, df_base: pd.DataFrame,
 
     # ── Step 3: 计算熵权 ──
     metrics_df = pd.DataFrame(all_metrics)
-    weights = entropy_weights(metrics_df)
+    weights = compute_weights(metrics_df,method="critic")
 
     # ── Step 4: 计算分位数阈值 ──
     quantiles = {}
@@ -369,7 +368,7 @@ _ALL_BASE_KWARGS = {
         ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
         mode="position_management_1", per_shares=200,
         start_date="20201211", pm_start_date="20210112",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=2, initial_capital=40000,
         data_source="tushare",
@@ -405,7 +404,7 @@ _ALL_BASE_KWARGS = {
         ts_code="01810.HK", stock_name="小米", market="HK",
         mode="position_management_1",
         start_date="20180709", pm_start_date="20180806",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=8, initial_capital=40000,
         data_source="akshare",
@@ -428,7 +427,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="评分体系校准 — 全域随机采样 → 熵权 + 分位数阈值")
     parser.add_argument("--ts-code", default="09992.HK", help="股票代码")
-    parser.add_argument("--n-samples", type=int, default=500,
+    parser.add_argument("--n-samples", type=int, default=1000,
                         help="LHS 采样数量 (默认: 500)")
     parser.add_argument("--workers", type=int,
                         default=max(1, multiprocessing.cpu_count() - 1),

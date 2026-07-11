@@ -45,7 +45,7 @@ _ALL_BASE_KWARGS = {
         ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
         mode="position_management_1", per_shares=200,
         start_date="20201211", pm_start_date="20210112",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=2, initial_capital=40000, pm_agg_k=1.0,
         data_source="tushare",
@@ -90,13 +90,12 @@ _ALL_BASE_KWARGS = {
 
 _ALL_OPTIMAL_PARAMS = {
     "09992.HK": dict(  # 泡泡玛特
-        pm_grid_down=0.10, pm_grid_up=0.05, pm_reduce_pct=0.6,
-        pm_add_pct=0.5, pm_adx_threshold=30,
-        pm_agg_k=0.66,
+        pm_grid_down=0.085,pm_grid_up=0.075,pm_reduce_pct=0.65,
+        pm_add_pct=0.52,pm_adx_threshold=21,pm_agg_k=0.66,
     ),
     "03690.HK": dict(  # 美团
-        pm_grid_down=0.10, pm_grid_up=0.04, pm_reduce_pct=0.60,
-        pm_add_pct=0.50, pm_adx_threshold=35, pm_agg_k=1,
+        pm_grid_down=0.10, pm_grid_up=0.027, pm_reduce_pct=0.57,
+        pm_add_pct=0.52, pm_adx_threshold=35, pm_agg_k=1,
     ),
     "02015.HK": dict(  # 理想
         pm_grid_down=0.12, pm_grid_up=0.03, pm_reduce_pct=0.60,

@@ -257,7 +257,7 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
 
     # strength 在 zone_blend 基础上 ±0.1 微调
     blend = zone_blend + (strength - 0.5) * 0.15
-    blend = min(max(blend + vol_adj, 0.0), 1.0)
+    blend = min(max(blend + vol_adj, 0.3), 0.7)
 
     # ── 不对称插值 ──
     # gd: blend↑ → gd↓（从 gd 插值到 gd*k，强趋势敢买回调）

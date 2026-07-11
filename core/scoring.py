@@ -1,13 +1,16 @@
 """海龟策略评分模块
 
 提供数据驱动的参数评分体系：
-  - 熵权法：让数据决定各指标的权重
+  - 熵权法 (entropy)：信息熵越低（数据离散度越高）→ 权重越大
+  - CRITIC 法 (critic)：同时考虑对比强度（标准差）和指标间冲突性（相关性），
+    给独立维度更高权重，避免相关指标"重复计票"
   - 百分位归一化：抗极端值的跨组评分（相对评分，依赖同组样本）
   - 绝对评分器：基于预校准分位数阈值的固定尺度评分（不依赖同组样本）
   - 奖惩机制：基于"超出/低于第二名比率"的边际奖惩
 
 用法：
-    from core.scoring import (entropy_weights, compute_percentile_scores,
+    from core.scoring import (entropy_weights, critic_weights,
+                              compute_percentile_scores,
                               apply_reward_penalty, AbsoluteScorer, create_absolute_scorer)
 """
 
@@ -72,6 +75,91 @@ def entropy_weights(metrics_df: pd.DataFrame) -> dict:
         "robust_sharpe": round(float(weights[1]), 4),
         "r_cubed": round(float(weights[2]), 4),
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# CRITIC 法 (Criteria Importance Through Intercriteria Correlation)
+# ═══════════════════════════════════════════════════════════════
+
+def critic_weights(metrics_df: pd.DataFrame) -> dict:
+    """CRITIC 法计算各指标权重。
+
+    同时考虑两个维度：
+      1. 对比强度（标准差）—— 离散度越高，区分力越强 → 权重越大
+      2. 冲突性（1-相关系数）—— 与其他指标相关性越低，信息越独立 → 权重越大
+
+    这解决了熵权法的核心缺陷：如果两个指标高度相关（如 excess 和
+    robust_sharpe），熵权法会给两者都高分（因为各自离散度高），
+    CRITIC 则通过 (1-r) 因子压低相关指标的权重。
+
+    Args:
+        metrics_df: DataFrame，必须包含列 excess, robust_sharpe, r_cubed
+
+    Returns:
+        {"excess": w1, "robust_sharpe": w2, "r_cubed": w3}，权重之和 = 1.0
+    """
+    cols = ["excess", "robust_sharpe", "r_cubed"]
+    data = metrics_df[cols].values.astype(float)
+
+    n_samples, n_indicators = data.shape
+
+    if n_samples < 3:
+        return {"excess": 0.50, "robust_sharpe": 0.40, "r_cubed": 0.10}
+
+    # Step 1: min-max 归一化到 [0, 1]
+    norm = np.zeros_like(data)
+    for j in range(n_indicators):
+        col_min = data[:, j].min()
+        col_max = data[:, j].max()
+        if col_max - col_min < 1e-12:
+            norm[:, j] = 0.5
+        else:
+            norm[:, j] = (data[:, j] - col_min) / (col_max - col_min)
+
+    # Step 2: 计算对比强度 σ_j（归一化后的标准差）
+    std = np.zeros(n_indicators)
+    for j in range(n_indicators):
+        std[j] = np.std(norm[:, j], ddof=1) if n_samples > 1 else 0.0
+
+    # Step 3: 计算相关系数矩阵，冲突性 = Σ(1 - |r_jk|)
+    corr = np.abs(np.corrcoef(norm.T))
+    conflict = np.zeros(n_indicators)
+    for j in range(n_indicators):
+        conflict[j] = np.sum(1.0 - corr[j, :])
+
+    # Step 4: 信息量 C_j = σ_j × conflict_j
+    C = std * conflict
+    C_sum = C.sum()
+
+    if C_sum < 1e-12:
+        return {"excess": 0.50, "robust_sharpe": 0.40, "r_cubed": 0.10}
+
+    weights = C / C_sum
+
+    return {
+        "excess": round(float(weights[0]), 4),
+        "robust_sharpe": round(float(weights[1]), 4),
+        "r_cubed": round(float(weights[2]), 4),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# 权重计算统一入口
+# ═══════════════════════════════════════════════════════════════
+
+def compute_weights(metrics_df: pd.DataFrame, method: str = "entropy") -> dict:
+    """统一权重计算入口。
+
+    Args:
+        metrics_df: DataFrame，包含 excess, robust_sharpe, r_cubed 列
+        method: "entropy" (熵权法) 或 "critic" (CRITIC 法)
+
+    Returns:
+        {"excess": w1, "robust_sharpe": w2, "r_cubed": w3}
+    """
+    if method == "critic":
+        return critic_weights(metrics_df)
+    return entropy_weights(metrics_df)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -196,14 +284,17 @@ def apply_reward_penalty(results: list[dict]) -> list[dict]:
 # ═══════════════════════════════════════════════════════════════
 
 def score_pipeline(all_results: list[dict],
-                   fixed_weights: dict | None = None) -> tuple[list[dict], dict]:
-    """完整评分管线：key映射 → 剔除0交易 → 熵权 → 百分位 → 奖惩。
+                   fixed_weights: dict | None = None,
+                   method: str = "entropy") -> tuple[list[dict], dict]:
+    """完整评分管线：key映射 → 剔除0交易 → 计算权重 → 百分位 → 奖惩。
 
     Args:
         all_results: 回测统计列表，每个 dict 需含 _window, _params,
                      超额收益 (%), 稳健夏普比率, R立方, 总交易
-        fixed_weights: 若提供，跳过熵权计算，直接使用此权重
+        fixed_weights: 若提供，跳过权重计算，直接使用此权重
                        (e.g. 来自 turtle_scoring.py 的固定权重)
+        method: 权重计算方法，"entropy" (熵权法) 或 "critic" (CRITIC 法)，
+                仅在 fixed_weights 为 None 时生效
 
     Returns:
         (scored_results, weights) — results 原地修改，weights 是实际使用的权重
@@ -223,7 +314,7 @@ def score_pipeline(all_results: list[dict],
         r.setdefault("robust_sharpe", r.get("稳健夏普比率", 0.0) or 0.0)
         r.setdefault("r_cubed", r.get("R立方", 0.0) or 0.0)
 
-    # Step 3: 熵权法（若提供了 fixed_weights 则跳过）
+    # Step 3: 计算权重（若提供了 fixed_weights 则跳过）
     if fixed_weights:
         weights = fixed_weights
     else:
@@ -234,7 +325,7 @@ def score_pipeline(all_results: list[dict],
                  "r_cubed": r["R立方"]}
                 for r in full_window_results
             ])
-            weights = entropy_weights(metrics_df)
+            weights = compute_weights(metrics_df, method=method)
         else:
             weights = {"excess": 0.50, "robust_sharpe": 0.40, "r_cubed": 0.10}
 
@@ -390,19 +481,22 @@ def create_absolute_scorer(calibration_source: str | dict) -> AbsoluteScorer:
 def score_pipeline_v2(all_results: list[dict],
                        fixed_weights: dict | None = None,
                        absolute_scorer: AbsoluteScorer | None = None,
-                       use_penalty: bool = True) -> tuple[list[dict], dict]:
-    """增强版评分管线：支持绝对评分器 + 可选奖惩。
+                       use_penalty: bool = True,
+                       method: str = "entropy") -> tuple[list[dict], dict]:
+    """增强版评分管线：支持绝对评分器 + 可选奖惩 + 多权重方法。
 
     与 score_pipeline 的区别：
-      - 支持传入 AbsoluteScorer，此时跳过熵权和百分位排名，
+      - 支持传入 AbsoluteScorer，此时跳过权重计算和百分位排名，
         直接使用绝对评分
       - 奖惩变为可选（绝对评分下奖惩意义不同）
+      - method 只在百分位模式下生效
 
     Args:
         all_results: 回测统计列表
         fixed_weights: 固定权重（用于百分位模式）
         absolute_scorer: 绝对评分器（优先使用）
         use_penalty: 是否应用奖惩机制
+        method: 权重计算方法，"entropy" 或 "critic"
 
     Returns:
         (scored_results, weights)
@@ -431,7 +525,7 @@ def score_pipeline_v2(all_results: list[dict],
         weights = fixed_weights
         compute_percentile_scores(all_results, weights)
     else:
-        # 百分位模式 + 熵权
+        # 百分位模式 + 自动权重
         full_window_results = [r for r in all_results if r["_window"] == "full"]
         if len(full_window_results) >= 3:
             metrics_df = pd.DataFrame([
@@ -439,7 +533,7 @@ def score_pipeline_v2(all_results: list[dict],
                  "r_cubed": r.get("r_cubed", 0)}
                 for r in full_window_results
             ])
-            weights = entropy_weights(metrics_df)
+            weights = compute_weights(metrics_df, method=method)
         else:
             weights = {"excess": 0.50, "robust_sharpe": 0.40, "r_cubed": 0.10}
         compute_percentile_scores(all_results, weights)

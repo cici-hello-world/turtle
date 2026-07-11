@@ -80,7 +80,7 @@ STOCK_CONFIGS = {
     ("03690.HK", "position_management_1"): dict(
         ts_code="03690.HK", stock_name="美团", market="HK",
         mode="position_management_1",
-        pm_start_date="20250625", start_date="20180920",end_date="20260706",
+        pm_start_date="20250625", start_date="20180920",
         user_dmi=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_grid_down=0.10, pm_grid_up=0.027, pm_reduce_pct=0.57,
@@ -91,11 +91,11 @@ STOCK_CONFIGS = {
     ("09992.HK", "position_management_1"): dict(
         ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
         mode="position_management_1", per_shares=200,
-        pm_start_date="20250609", start_date="20201211",end_date="20260616",
+        pm_start_date="20251001", start_date="20201211",
         user_dmi=True, pm_adaptive_grid=True,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_grid_down=0.105, pm_grid_up=0.075, pm_reduce_pct=0.570,
-        pm_add_pct=0.45, pm_adx_threshold=21, pm_agg_k=0.66,
+        pm_grid_down=0.085, pm_grid_up=0.075, pm_reduce_pct=0.65,
+        pm_add_pct=0.52, pm_adx_threshold=21, pm_agg_k=0.66,
         pm_initial_shares=2, initial_capital=40000,
         data_source="tushare",
     ),
