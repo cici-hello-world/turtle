@@ -50,7 +50,7 @@ DEFAULT_PARAM_SPACE = {
     "pm_reduce_pct":     (0.30, 0.80),
     "pm_add_pct":        (0.20, 0.60),
     "pm_adx_threshold":  (15, 50),
-    "pm_agg_k":          (0.50, 1.0),
+    "pm_agg_k":          (1.0, 1.0),
 }
 
 
@@ -389,16 +389,16 @@ _ALL_BASE_KWARGS = {
         user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=25, initial_capital=40000,
-        data_source="akshare",
+        data_source="tushare",
     ),
     "06181.HK": dict(  # 老铺
         ts_code="06181.HK", stock_name="老铺", market="HK",
         mode="position_management_1", per_shares=100,
         start_date="20240628", pm_start_date="20240729",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=3, initial_capital=40000,
-        data_source="akshare",
+        data_source="tushare",
     ),
     "01810.HK": dict(  # 小米
         ts_code="01810.HK", stock_name="小米", market="HK",

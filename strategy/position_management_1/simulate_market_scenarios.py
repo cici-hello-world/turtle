@@ -51,7 +51,7 @@ _ALL_BASE_KWARGS = {
         mode="position_management_1", pm_start_date="20260629",
         ema_slow=0, ema_fast=0, pm_initial_shares=3,
         initial_capital=40000, user_dmi=True,
-        pm_dynamic_position=False, pm_adaptive_grid=False,
+        pm_dynamic_position=False, pm_adaptive_grid=True,
         per_shares=100, data_source="akshare",
     ),
     "02015.HK": dict(  # 理想
@@ -91,8 +91,8 @@ _ALL_BASE_KWARGS = {
 
 _ALL_BEST_PARAMS = {
     "06181.HK": dict(  # 老铺
-        pm_grid_down=0.075, pm_grid_up=0.07, pm_reduce_pct=0.38,
-        pm_add_pct=0.25, pm_adx_threshold=32, pm_agg_k=1,
+        pm_grid_down=0.045, pm_grid_up=0.044, pm_reduce_pct=0.46,
+        pm_add_pct=0.4, pm_adx_threshold=32, pm_agg_k=0.76,
     ),
     "02015.HK": dict(  # 理想
         pm_grid_down=0.095, pm_grid_up=0.07, pm_reduce_pct=0.35,

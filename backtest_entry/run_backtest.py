@@ -124,13 +124,13 @@ STOCK_CONFIGS = {
     ("06181.HK", "position_management_1"): dict(
         ts_code="06181.HK", stock_name="老铺", market="HK",
         mode="position_management_1",
-        pm_start_date="20240628", start_date="20240628",
-        user_dmi=True, pm_adaptive_grid=False,
-        pm_grid_down=0.075, pm_grid_up=0.07, pm_reduce_pct=0.38,
-        pm_add_pct=0.25, pm_adx_threshold=32, pm_agg_k=1,
+        pm_start_date="20251001", start_date="20240628",
+        user_dmi=True, pm_adaptive_grid=True,
+        pm_grid_down=0.045, pm_grid_up=0.044, pm_reduce_pct=0.46,
+        pm_add_pct=0.4, pm_adx_threshold=32, pm_agg_k=0.76,
         ema_slow=0, ema_fast=0, pm_initial_shares=3,
         initial_capital=40000, pm_dynamic_position=False,
-        data_source="akshare",
+        data_source="tushare",
     ),
     # long_more 模式示例
     ("09992.HK", "long_more"): dict(
