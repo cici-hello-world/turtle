@@ -57,7 +57,7 @@ _ALL_BASE_KWARGS = {
         ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
         mode="position_management_1", per_shares=200,
         start_date="20201211", pm_start_date="20210112",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=2, initial_capital=40000,
         data_source="tushare",
@@ -108,7 +108,7 @@ _ALL_SWEEP_RANGES = {
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
         "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
         "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [0.5,0.6,0.7,0.8,0.9,1.0],
+        "pm_agg_k": [1.0],
     },
     "03690.HK": {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
@@ -124,7 +124,7 @@ _ALL_SWEEP_RANGES = {
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
         "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
         "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [ 1.0],
+        "pm_agg_k": [1.0],
     },
     "01810.HK": {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
@@ -173,11 +173,12 @@ WORKERS = max(1, multiprocessing.cpu_count() - 1)
 
 # 固定熵权 — key 为 ts_code，通过 get_scoring_weights(ts_code) 获取
 SCORING_WEIGHTS = {
-    "02015.HK": dict(excess=0.5423, robust_sharpe=0.2356, r_cubed=0.2221),  # 理想
-    "09992.HK": dict(excess=0.3523, robust_sharpe=0.3285, r_cubed=0.3192),  # 泡泡玛特
+    "02015.HK": dict(excess=0.4186, robust_sharpe=0.2906, r_cubed=0.2907),  # 理想
+    "09992.HK": dict(excess=0.3683, robust_sharpe=0.3774, r_cubed=0.2542),  # 泡泡玛特
     "01810.HK": dict(excess=0.3461, robust_sharpe=0.3455, r_cubed=0.3084),  # 小米
     "06181.HK": dict(excess=0.3438, robust_sharpe=0.3311, r_cubed=0.3251),  # 老铺
     "03690.HK": dict(excess=0.361, robust_sharpe=0.207, r_cubed=0.4319),    # 美团
+
 }
 
 

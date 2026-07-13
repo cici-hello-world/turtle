@@ -67,7 +67,7 @@ _ALL_BASE_KWARGS = {
         mode="position_management_1", pm_start_date="20260629",
         ema_slow=0, ema_fast=0, pm_initial_shares=2,
         initial_capital=40000, user_dmi=True,
-        pm_dynamic_position=False, pm_adaptive_grid=True,
+        pm_dynamic_position=False, pm_adaptive_grid=False,
         per_shares=200, data_source="akshare",
     ),
     "03690.HK": dict(  # 美团
@@ -95,12 +95,12 @@ _ALL_BEST_PARAMS = {
         pm_add_pct=0.4, pm_adx_threshold=32, pm_agg_k=0.76,
     ),
     "02015.HK": dict(  # 理想
-        pm_grid_down=0.095, pm_grid_up=0.07, pm_reduce_pct=0.35,
-        pm_add_pct=0.30, pm_adx_threshold=25, pm_agg_k=1,
+        pm_grid_down=0.05, pm_grid_up=0.04, pm_reduce_pct=0.75,
+        pm_add_pct=0.50, pm_adx_threshold=24, pm_agg_k=1,
     ),
     "09992.HK": dict(  # 泡泡玛特
-        pm_grid_down=0.085, pm_grid_up=0.075, pm_reduce_pct=0.65,
-        pm_add_pct=0.52, pm_adx_threshold=21, pm_agg_k=0.66,
+        pm_grid_down=0.14, pm_grid_up=0.055, pm_reduce_pct=0.75,
+        pm_add_pct=0.5, pm_adx_threshold=31, pm_agg_k=1,
     ),
     "03690.HK": dict(  # 美团
         pm_grid_down=0.10, pm_grid_up=0.027, pm_reduce_pct=0.57,

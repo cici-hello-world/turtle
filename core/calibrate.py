@@ -386,7 +386,7 @@ _ALL_BASE_KWARGS = {
         ts_code="02015.HK", stock_name="理想", market="HK",
         mode="position_management_1", per_shares=100,
         start_date="20220813", pm_start_date="20220913",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=25, initial_capital=40000,
         data_source="tushare",
@@ -407,7 +407,7 @@ _ALL_BASE_KWARGS = {
         user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=8, initial_capital=40000,
-        data_source="akshare",
+        data_source="tushare",
     ),
 }
 
