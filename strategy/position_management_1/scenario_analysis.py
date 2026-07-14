@@ -56,7 +56,8 @@ SCENARIOS = {
 
 def load_data(ts_code: str) -> pd.DataFrame:
     """加载数据并计算基础指标"""
-    cache_dir = Path(__file__).parent.parent.parent / "data_cache" / "HK"
+    market = "HK" if ts_code.split(".")[1] == "HK" else "A"
+    cache_dir = Path(__file__).parent.parent.parent / "data_cache" / market
     path = cache_dir / f"{ts_code}.parquet"
     if not path.exists():
         raise FileNotFoundError(f"数据文件不存在: {path}")
@@ -675,6 +676,7 @@ def main():
     ts_code = sys.argv[1] if len(sys.argv) > 1 else "02015.HK"
     start_date = sys.argv[2] if len(sys.argv) > 2 else "2025-10-01"
     mode = sys.argv[3] if len(sys.argv) > 3 else "full"
+
 
     # ── 输出文件 ──
     out_dir = Path(__file__).parent.parent.parent / "result"

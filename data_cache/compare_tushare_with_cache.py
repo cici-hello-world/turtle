@@ -76,8 +76,7 @@ def fetch_tushare(ts_code: str, market: str,
         return _fetch_hk_share(pro, ts_code, start_date, end_date)
 
 
-def compare_with_cache(ts_code: str, stock_name: str, market: str,
-                       start_date: str, end_date: str) -> dict:
+def compare_with_cache(ts_code: str, stock_name: str, market: str) -> dict:
     """对比 Tushare 与缓存(东财)数据，返回结果摘要"""
     result = {
         "ts_code": ts_code,
@@ -101,7 +100,6 @@ def compare_with_cache(ts_code: str, stock_name: str, market: str,
         result["cache_rows"] = -1
         return result
 
-    df_cache = df_cache[(df_cache["Date"] >= start_date) & (df_cache["Date"] <= end_date)].copy()
     result["cache_rows"] = len(df_cache)
     print(f"  📦 缓存(东财): {len(df_cache)} 条")
 
@@ -240,7 +238,6 @@ def compare_with_cache(ts_code: str, stock_name: str, market: str,
 def main():
     target_market = None
     target_code = None
-    days = None
 
     i = 1
     while i < len(sys.argv):
@@ -248,19 +245,13 @@ def main():
         if arg in ("HK", "A", "ETF"):
             target_market = arg
         elif arg == "--days" and i + 1 < len(sys.argv):
-            days = int(sys.argv[i + 1])
             i += 1
         elif "." in arg:
             target_code = arg
         i += 1
 
-    end_date = datetime.today().strftime("%Y%m%d")
-    start_date = (datetime.today() - timedelta(days=int(days * 1.5))).strftime("%Y%m%d") \
-        if days else "20200101"
-
     print("=" * 70)
     print("🔬 Tushare vs 缓存(东财/akshare) 日线行情对比")
-    print(f"📅 日期范围: {start_date} ~ {end_date}" + (f" (最近{days}个交易日)" if days else ""))
     print(f"🔍 对比列: {', '.join(COMPARE_COLS)}")
     print(f"📏 容差: 价格≤{PRICE_TOLERANCE}, 成交量≤{VOLUME_TOLERANCE}手, 成交额≤{AMOUNT_TOLERANCE}千元")
     print("=" * 70)
@@ -294,7 +285,7 @@ def main():
     for ts_code, market, name in stocks:
         print(f"\n{'─' * 60}")
         print(f"🔍 {name} ({ts_code})")
-        res = compare_with_cache(ts_code, name, market, start_date, end_date)
+        res = compare_with_cache(ts_code, name, market)
         summary.append(res)
 
     # ── 汇总 ──

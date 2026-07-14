@@ -418,6 +418,15 @@ _ALL_BASE_KWARGS = {
             pm_initial_shares=0, initial_capital=60000,
             data_source="tushare",
     ),
+    "000625.SZ": dict(  # 长安
+            ts_code="000625.SZ", stock_name="长安", market="A",
+            mode="position_management_1",
+            start_date="20160701", pm_start_date="20160729",
+            user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+            pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+            pm_initial_shares=9, initial_capital=40000,
+            data_source="tushare",
+    ),
 }
 
 BASE_KWARGS = None

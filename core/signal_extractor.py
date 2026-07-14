@@ -27,6 +27,8 @@ class DailySignal:
     current_shares: int
     reference_price: float
     last_trade_date: str
+    last_type: str
+    last_shares: int
 
     # 今日 DMI
     adx: float | None
@@ -133,6 +135,8 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
     else:
         current_lots = config.pm_initial_shares
         last_trade_date = "-"
+        last_type = "-"
+        last_shares = "-"
         start_date = pd.to_datetime(config.pm_start_date)
         mask = pd.to_datetime(df["Date"]) >= start_date
         reference_price = float(df.loc[mask, "Close"].iloc[0]) if mask.any() else float(today["Close"])
@@ -203,6 +207,7 @@ def format_signal(s: DailySignal) -> str:
         f"DMI: {s.dmi_area}区 {'多头' if s.is_bull else '空头'}  "
         f"ADX{s.adx or '?'}{adx_up_str}  +DI{s.plus_di or '?'} −DI{s.minus_di or '?'}"
     )
+    trade_detail=None
 
     # # 网格描述
     # if s.dmi_area == "A" and s.is_bull:

@@ -98,6 +98,15 @@ _ALL_BASE_KWARGS = {
         pm_initial_shares=8, initial_capital=40000,
         data_source="tushare",
     ),
+    "000625.SZ": dict(  # 长安
+        ts_code="000625.SZ", stock_name="长安", market="A",
+        mode="position_management_1",
+        pm_start_date="20160729", start_date="20160701",
+        user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
+        pm_dynamic_position=False,ema_fast=0,ema_slow=0,
+        pm_initial_shares=9, initial_capital=40000,
+        data_source="tushare",
+    ),
 
 }
 
@@ -142,6 +151,14 @@ _ALL_SWEEP_RANGES = {
         "pm_adx_threshold": [25, 30, 35],
         "pm_agg_k": [0.5,0.6,0.7,0.8,0.9,1.0],
     },
+    "000625.SZ": {
+        "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
+        "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
+        "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
+        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+        "pm_adx_threshold": [25, 30, 35],
+        "pm_agg_k": [ 1.0],
+    },
 }
 
 # 运行时激活的配置（由 init_config 设置）
@@ -178,7 +195,7 @@ SCORING_WEIGHTS = {
     "01810.HK": dict(excess=0.3461, robust_sharpe=0.3455, r_cubed=0.3084),  # 小米
     "06181.HK": dict(excess=0.3438, robust_sharpe=0.3311, r_cubed=0.3251),  # 老铺
     "03690.HK": dict(excess=0.361, robust_sharpe=0.207, r_cubed=0.4319),    # 美团
-
+    "000625.SZ": dict(excess=0.3764, robust_sharpe=0.3358, r_cubed=0.2878),    # 长安
 }
 
 

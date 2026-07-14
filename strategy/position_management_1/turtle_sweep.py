@@ -86,6 +86,15 @@ _ALL_BASE_KWARGS = {
         pm_initial_shares=8, initial_capital=40000,
         data_source="tushare",
     ),
+    "000625.SZ": dict(  # 长安
+        ts_code="000625.SZ", stock_name="长安", market="A",
+        mode="position_management_1",
+        pm_start_date="20160729", start_date="20160701",
+        user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
+        pm_dynamic_position=False,ema_fast=0,ema_slow=0,
+        pm_initial_shares=9, initial_capital=40000,
+        data_source="tushare",
+    ),
 }
 
 _ALL_OPTIMAL_PARAMS = {
@@ -108,6 +117,10 @@ _ALL_OPTIMAL_PARAMS = {
     "01810.HK": dict(  # 小米
         pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.69,
         pm_add_pct=0.33, pm_adx_threshold=26, pm_agg_k=1,
+    ),
+    "000625.SZ": dict(  # 长安
+        pm_grid_down=0.08, pm_grid_up=0.028, pm_reduce_pct=0.66,
+        pm_add_pct=0.33, pm_adx_threshold=20, pm_agg_k=1,
     ),
 }
 
@@ -166,6 +179,14 @@ SCORING_CONFIG = {
             excess=dict(type="linear_quantile", slope=1.3551, intercept=474.5682),
             robust_sharpe=dict(type="linear_quantile", slope=115.3846, intercept=-31.9231),
             r_cubed=dict(type="linear_quantile", slope=4.8932, intercept=-12.5665),
+        ),
+    ),
+    "000625.SZ": dict(  # 长安
+        weights=dict(excess=0.3764, robust_sharpe=0.3358, r_cubed=0.2878),
+        scoring_params=dict(
+            excess=dict(type="linear_quantile", slope=1.0949, intercept=23.8280),
+            robust_sharpe=dict(type="linear_quantile", slope=169.8113, intercept=79.7170),
+            r_cubed=dict(type="linear_quantile", slope=204.5455, intercept=74.5455),
         ),
     ),
 }

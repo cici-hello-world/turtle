@@ -135,12 +135,24 @@ STOCK_CONFIGS = {
     ("00700.HK","position_management_1"): dict(  # 腾讯
         ts_code="00700.HK", stock_name="腾讯", market="HK",
         mode="position_management_1",
-        pm_start_date="20251001",start_date="20160629",
+        pm_start_date="20251001",start_date="20160701",
         user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=0, initial_capital=60000,
         data_source="tushare",
     ),
+    ("000625.SZ","position_management_1"): dict(  # 长安
+        ts_code="000625.SZ", stock_name="长安", market="A",
+        mode="position_management_1",
+        pm_start_date="20251001", start_date="20160701",
+        user_dmi=True, pm_adaptive_grid=False,
+        pm_grid_down=0.08, pm_grid_up=0.028, pm_reduce_pct=0.66,
+        pm_add_pct=0.33, pm_adx_threshold=20, pm_agg_k=1,
+        ema_slow=0, ema_fast=0, pm_initial_shares=8,
+        initial_capital=40000,pm_dynamic_position=False,
+        per_shares=100, data_source="akshare",
+    ),
+
     # long_more 模式示例
     ("09992.HK", "long_more"): dict(
         ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
@@ -156,6 +168,12 @@ STOCK_CONFIGS = {
         ts_code="06181.HK", stock_name="老铺", market="HK",
         mode="long_more", ema_fast=0, ema_slow=0, user_dmi=False,
         start_date="20240628", end_date="20260624",
+        initial_capital=200000,
+    ),
+    ("00700.HK", "long_more"): dict(
+        ts_code="00700.HK", stock_name="腾讯", market="HK",
+        mode="long_more", ema_fast=0, ema_slow=0, user_dmi=False,
+        start_date="20160704",
         initial_capital=200000,
     ),
 }

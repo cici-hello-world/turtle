@@ -86,6 +86,14 @@ _ALL_BASE_KWARGS = {
         pm_dynamic_position=False, pm_adaptive_grid=False,
         per_shares=100, data_source="akshare",
     ),
+    "000625.SZ": dict(  # 长安
+        ts_code="000625.SZ", stock_name="长安", market="A",
+        mode="position_management_1", pm_start_date="20260629",
+        ema_slow=0, ema_fast=0, pm_initial_shares=8,
+        initial_capital=40000, user_dmi=True,
+        pm_dynamic_position=False, pm_adaptive_grid=False,
+        per_shares=100, data_source="akshare",
+    ),
 
 }
 
@@ -109,6 +117,10 @@ _ALL_BEST_PARAMS = {
     "01810.HK": dict(  # 小米
         pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.69,
         pm_add_pct=0.33, pm_adx_threshold=26, pm_agg_k=1,
+    ),
+    "000625.SZ": dict(  # 长安
+        pm_grid_down=0.08, pm_grid_up=0.028, pm_reduce_pct=0.66,
+        pm_add_pct=0.33, pm_adx_threshold=20, pm_agg_k=1,
     ),
 }
 

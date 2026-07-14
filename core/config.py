@@ -113,8 +113,8 @@ class BacktestConfig:
             self.start_date = (today - pd.DateOffset(years=self.years)).strftime("%Y%m%d")
         if not self.end_date:
             self.end_date = today.strftime("%Y%m%d")
-            if pd.Timestamp.now().hour < 20:
-                # 晚上8点之后才拉取当前的，否则值拉取到前一天
+            if pd.Timestamp.now().hour < 18:
+                # 晚上6点之后才拉取当前的，否则值拉取到前一天
                 self.end_date = (today - pd.DateOffset(days=1)).strftime("%Y%m%d")
 
         # 自动推导交易所代码
