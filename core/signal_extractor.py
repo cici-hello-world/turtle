@@ -61,8 +61,8 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
     """
     try:
         end_date = pd.Timestamp.today().strftime("%Y%m%d")
-        if pd.Timestamp.now().hour < 20:
-            # 晚上8点之后才拉取当前的，否则值拉取到前一天
+        if pd.Timestamp.now().hour < 18:
+            # 晚上6点之后才拉取当前的，否则值拉取到前一天
             end_date = (pd.Timestamp.today() - pd.DateOffset(days=1)).strftime("%Y%m%d")
         df = fetch_data(
             ts_code=config.ts_code,
@@ -128,6 +128,8 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         reference_price = float(last.get("Reference_Price", 0))
         last_trade_date = str(last.get("Date", ""))[:10]
         last_equity = float(last.get("Equity_After", 0))
+        last_type = last.get("Type", "无")
+        last_shares = int(last.get("Shares", 0))
     else:
         current_lots = config.pm_initial_shares
         last_trade_date = "-"
@@ -181,6 +183,8 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         reduce_lots=reduce_lots,
         dmi_blocked=dmi_blocked,
         today_close=today_close,
+        last_type=last_type,
+        last_shares=last_shares,
     )
 
 
@@ -200,17 +204,17 @@ def format_signal(s: DailySignal) -> str:
         f"ADX{s.adx or '?'}{adx_up_str}  +DI{s.plus_di or '?'} −DI{s.minus_di or '?'}"
     )
 
-    # 网格描述
-    if s.dmi_area == "A" and s.is_bull:
-        grid_desc = "宽·让利润跑"
-    elif s.dmi_area in ("B", "C") and s.is_bull:
-        grid_desc = "中·适度止盈"
-    elif not s.is_bull:
-        grid_desc = "窄·防守"
-    elif s.dmi_area == "D":
-        grid_desc = "窄·震荡"
-    else:
-        grid_desc = "默认"
+    # # 网格描述
+    # if s.dmi_area == "A" and s.is_bull:
+    #     grid_desc = "宽·让利润跑"
+    # elif s.dmi_area in ("B", "C") and s.is_bull:
+    #     grid_desc = "中·适度止盈"
+    # elif not s.is_bull:
+    #     grid_desc = "窄·防守"
+    # elif s.dmi_area == "D":
+    #     grid_desc = "窄·震荡"
+    # else:
+    #     grid_desc = "默认"
 
     # 持仓
     if s.current_lots > 0:
@@ -218,13 +222,14 @@ def format_signal(s: DailySignal) -> str:
     else:
         pos = f"空仓  参考价 {s.reference_price:.2f}"
     if s.last_trade_date and s.last_trade_date != "-":
-        pos += f"  上次交易 {s.last_trade_date}"
+        trade_detail = f"上次交易 {s.last_trade_date}  {s.last_type}价格{s.reference_price} 数量{s.last_shares}手"
 
     lines = [
-        f"**{s.stock_name}** {s.ts_code} --今日收盘价 {s.today_close}",
+        f"**{s.stock_name}** {s.ts_code} --{s.signal_date}收盘价 {s.today_close}",
         f"  {pos}",
+        f"  {trade_detail if trade_detail else "无交易"}",
         f"  {dmi_detail}",
-        f"  网格: 下{s.eff_grid_down*100:.1f}% 上{s.eff_grid_up*100:.1f}% ({grid_desc})",
+        f"  网格: 下{s.eff_grid_down*100:.1f}% 上{s.eff_grid_up*100:.1f}%",
     ]
 
     # 触发信号

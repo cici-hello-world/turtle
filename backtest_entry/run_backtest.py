@@ -132,6 +132,15 @@ STOCK_CONFIGS = {
         initial_capital=40000, pm_dynamic_position=False,
         data_source="tushare",
     ),
+    ("00700.HK","position_management_1"): dict(  # 腾讯
+        ts_code="00700.HK", stock_name="腾讯", market="HK",
+        mode="position_management_1",
+        pm_start_date="20251001",start_date="20160629",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=0, initial_capital=60000,
+        data_source="tushare",
+    ),
     # long_more 模式示例
     ("09992.HK", "long_more"): dict(
         ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
