@@ -111,8 +111,8 @@ _ALL_OPTIMAL_PARAMS = {
         pm_add_pct=0.50, pm_adx_threshold=24, pm_agg_k=1,
     ),
     "06181.HK": dict(  # 老铺
-        pm_grid_down=0.05, pm_grid_up=0.04, pm_reduce_pct=0.75,
-        pm_add_pct=0.40, pm_adx_threshold=30, pm_agg_k=0.7,
+        pm_grid_down=0.1, pm_grid_up=0.028, pm_reduce_pct=0.75,
+        pm_add_pct=0.50, pm_adx_threshold=30, pm_agg_k=0.8,
     ),
     "01810.HK": dict(  # 小米
         pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.69,

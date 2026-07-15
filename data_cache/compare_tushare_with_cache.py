@@ -73,7 +73,7 @@ def fetch_tushare(ts_code: str, market: str,
     if market == "A":
         return _fetch_a_share(pro, ts_code, start_date, end_date)
     else:
-        return _fetch_hk_share(pro, ts_code, start_date, end_date)
+        return _fetch_hk_share(pro, ts_code, start_date, end_date,data_source="sina")
 
 
 def compare_with_cache(ts_code: str, stock_name: str, market: str) -> dict:
