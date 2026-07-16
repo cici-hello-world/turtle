@@ -54,7 +54,7 @@ print(f"📡 数据源: {DATA_SOURCE}")
 
 ENTRY_PERIOD = 20
 EXIT_PERIOD = 10
-ATR_PERIOD = 14
+ATR_PERIOD = 20
 
 FAST_PERIODS = [20, 25, 30, 40, 50]
 SLOW_PERIODS = [50, 60, 80, 100, 150, 200, 250, 300, 350]
@@ -462,7 +462,7 @@ def run_parameter_scan(top10_stocks,name_map) -> pd.DataFrame:
             bb_k=config.bb_k,
             mode=config.mode,
         )
-        trades, equity = _run_long_with_pyramid(df,config)
+        trades, equity,_ = _run_long_with_pyramid(df,config)
         baseline = calc_stats(trades, config.initial_capital, equity)
         baseline["ema_fast"] = 0
         baseline["ema_slow"] = 0
@@ -486,7 +486,7 @@ def run_parameter_scan(top10_stocks,name_map) -> pd.DataFrame:
                 bb_k=config.bb_k,
                 mode=config.mode,
             )
-            trades, eq = _run_long_with_pyramid(df, config)
+            trades, eq,_ = _run_long_with_pyramid(df, config)
             metrics = calc_stats(trades, config.initial_capital, equity)
             metrics["ema_fast"] = fast
             metrics["ema_slow"] = slow

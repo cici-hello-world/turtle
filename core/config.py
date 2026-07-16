@@ -29,7 +29,7 @@ class BacktestConfig:
     # ========== 策略参数 ==========
     entry_period: int = 20
     exit_period: int = 10
-    atr_period: int = 14
+    atr_period: int = 20
     n_value: float = 2.0  # 止损 ATR 倍数
     risk_percent: float = 1.0  # 单笔风险 %
     initial_capital: float = 200000.0
@@ -52,14 +52,12 @@ class BacktestConfig:
     max_pyramid: int = 4  # 最大加仓次数（含初始仓位，Turtle 原版单一市场上限 4 单位）
     skip_first_add: bool = False  # 跳过首次加仓，总加仓次数-1（仅 long_more）
 
-    # ========== Turtle 原版系统参数 ==========
-    turtle_system: int = 1           # 1=System1(20/10), 2=System2(55/20)
-    sys1_loser_filter: bool = True   # System 1 输家突破过滤：上一笔盈利则跳过下次信号
-
     # ========== Anti-Martingale 参数（仅 anti_martingale 模式） ==========
     am_ma_period: int = 50               # MA 均线周期，用于入场/出场信号
     am_risk_multiplier: float = 1.5      # 盈利后风险乘数
     am_max_multiplier: float = 4.0       # 最大风险乘数上限
+    # ========== donchian 参数（网格仓位管理） ==========
+    don_start_date: str = ""          # donchian起始日期，格式 "YYYYMMDD"
 
     # ========== Position Management 1 参数（网格仓位管理） ==========
     pm_start_date: str = ""          # 仓位管理起始日期，格式 "YYYYMMDD"

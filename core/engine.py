@@ -178,8 +178,7 @@ _STOCK_GRID_CONSTANTS = {
 
 def _get_grid_constants(ts_code: str) -> dict:
     """获取个股自适应网格常量，未配置的股票返回默认值（09992.HK）。"""
-    return _STOCK_GRID_CONSTANTS.get(
-        ts_code, _STOCK_GRID_CONSTANTS["09992.HK"])
+    return _STOCK_GRID_CONSTANTS.get(ts_code)
 
 
 def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[float, float, float]:
@@ -552,9 +551,9 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
 
     trades = []
     capital = config.initial_capital
-
     start_index = config.entry_period + 1
-
+    if config.don_start_date != "":
+        start_index = df.index.get_loc(df[df["Date"] == config.don_start_date].index[0])
 
     pos = None
     entry_price = 0.0
@@ -568,10 +567,12 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
     cumulative_div = 0.0
     entry_date = None
     more_info = []
-    last_trade_pnl = 0.0  # System 1 输家突破过滤：上一笔盈亏
     equity_curve = []
     equity_dates = []
     for i in range(start_index, len(df)):
+        if config.mode == "position_management_1" and i==start_index+1 and pos is None:
+            _snap()
+            return trades, equity_curve, equity_dates
         row = df.iloc[i]
         current_date = row["Date"]
         close = float(row["Close"])
@@ -598,10 +599,6 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
             if (_long_entry_triggered(row, config)
                     # and _dmi_trend_ok(row, config)
                     and _ema_trend_ok(row, config)):
-                # System 1 输家突破过滤：上一笔盈利则跳过本次突破信号
-                if config.sys1_loser_filter and config.turtle_system == 1 and last_trade_pnl > 0:
-                    _snap()
-                    continue
                 cost = row["Close"] * shares * ps
                 trade_cost = _pm_trade_cost(cost,config.market,"buy")
                 cost += trade_cost
@@ -654,7 +651,6 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
                 sell_proceeds-=trade_cost
                 pnl = sell_proceeds - total_cost + cumulative_div
                 capital += sell_proceeds
-                last_trade_pnl = pnl  # System 1 输家突破过滤：记录本笔盈亏
 
                 trades.append(_build_trade(
                     entry_date, current_date, "Long",
@@ -721,7 +717,6 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
     total_income = 0.0
     entry_date = None
     more_info = []
-    last_trade_pnl = 0.0  # System 1 输家突破过滤：上一笔盈亏
 
     for i in range(start_index, len(df)):
         row = df.iloc[i]
@@ -748,10 +743,6 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
             max_shares = shares * (config.max_pyramid - skip_offset)
 
             if _short_entry_triggered(row, config) and _ema_trend_ok(row, config,"short"):
-                # System 1 输家突破过滤：上一笔盈利则跳过本次突破信号
-                if config.sys1_loser_filter and config.turtle_system == 1 and last_trade_pnl > 0:
-                    _snap()
-                    continue
                 entry_price = row["Close"]
                 entry_atr = row["ATR"]
                 income = entry_price * shares * ps
@@ -787,7 +778,6 @@ def _run_short_with_pyramid(df: pd.DataFrame, config) -> tuple[list[dict], list[
                 sale_proceeds = exit_price * current_shares * ps
                 pnl = total_income - sale_proceeds
                 capital -= sale_proceeds
-                last_trade_pnl = pnl  # System 1 输家突破过滤：记录本笔盈亏
 
                 trades.append(_build_trade(
                     entry_date, current_date, "short",
@@ -1168,9 +1158,10 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
         if config.pm_adaptive and close > hh_entry and _dmi_trend_area(row, config, "long", dmi_bl) == "A":
             # ---- 单边上涨趋势 → Donchian 通道：趋势跟踪，不轻易卖 ----
             # Donchian 买入：突破20日高点 + 趋势加速/中继确认 → 加仓
-            df_donchian = df.iloc[(i - config.entry_period - 1):]
+            df_donchian = df.iloc[i:]
             tmp_config = copy.deepcopy(config)
             tmp_config.initial_capital = capital
+            tmp_config.don_start_date = current_date
             trades,eq,eq_dates =_run_long_with_pyramid(df_donchian, tmp_config, True)
             if trades:
                 donchian_done = True

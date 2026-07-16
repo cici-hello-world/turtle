@@ -55,7 +55,7 @@ def run(config: BacktestConfig):
         trades, equity, eq_dates = run_backtest(df, config)
 
         # 4. 基准收益（同期买入持有）
-        bm_start_str = config.pm_start_date or config.start_date
+        bm_start_str = config.pm_start_date or config.don_start_date
         bm_mask = df["Date"] >= pd.to_datetime(bm_start_str)
         bm_start = df.loc[bm_mask, "Close"].iloc[0]
         bm_end = df["Close"].iloc[-1]
@@ -83,8 +83,8 @@ STOCK_CONFIGS = {
         pm_start_date="20260629", start_date="20180920",
         user_dmi=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_grid_down=0.10, pm_grid_up=0.027, pm_reduce_pct=0.57,
-        pm_add_pct=0.52, pm_adx_threshold=35, pm_agg_k=1,
+        pm_grid_down=0.10, pm_grid_up=0.039, pm_reduce_pct=0.51,
+        pm_add_pct=0.5, pm_adx_threshold=35, pm_agg_k=1,
         pm_initial_shares=2, initial_capital=40000,
         data_source="akshare",
     ),
@@ -94,8 +94,8 @@ STOCK_CONFIGS = {
         pm_start_date="20260629", start_date="20201211",
         user_dmi=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_grid_down=0.14, pm_grid_up=0.055, pm_reduce_pct=0.75,
-        pm_add_pct=0.5, pm_adx_threshold=31, pm_agg_k=1,
+        pm_grid_down=0.15, pm_grid_up=0.065, pm_reduce_pct=0.67,
+        pm_add_pct=0.42, pm_adx_threshold=37, pm_agg_k=1,
         pm_initial_shares=2, initial_capital=40000,
         data_source="tushare",
     ),
@@ -114,9 +114,9 @@ STOCK_CONFIGS = {
         ts_code="01810.HK", stock_name="小米", market="HK",
         mode="position_management_1",
         user_dmi=True, ema_fast=0, ema_slow=0,
-        pm_start_date="20250509", start_date="20180709", end_date="20260515",
-        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.69,
-        pm_add_pct=0.33, pm_adx_threshold=26, pm_agg_k=1,
+        pm_start_date="20260629", start_date="20180709",
+        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.70,
+        pm_add_pct=0.36, pm_adx_threshold=27, pm_agg_k=1,
         pm_initial_shares=8, initial_capital=40000,
         pm_dynamic_position=False, pm_adaptive_grid=False,
         data_source="akshare",
@@ -124,7 +124,7 @@ STOCK_CONFIGS = {
     ("06181.HK", "position_management_1"): dict(
         ts_code="06181.HK", stock_name="老铺", market="HK",
         mode="position_management_1",
-        pm_start_date="20260629", start_date="20240628",
+        pm_start_date="20260122", start_date="20240628",
         user_dmi=True, pm_adaptive_grid=True,
         pm_grid_down=0.1, pm_grid_up=0.028, pm_reduce_pct=0.75,
         pm_add_pct=0.50, pm_adx_threshold=30, pm_agg_k=0.8,
@@ -157,17 +157,19 @@ STOCK_CONFIGS = {
     ("09992.HK", "long_more"): dict(
         ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
         mode="long_more", years=5, per_shares=200,
-        initial_capital=400000, max_pyramid=5,
+        initial_capital=400000, max_pyramid=5,don_start_date="20260629",
         ema_fast=0, ema_slow=0, data_source="akshare",
     ),
     ("03690.HK", "long_more"): dict(
         ts_code="03690.HK", stock_name="美团", market="HK",
-        mode="long_more", max_pyramid=5, channel_type="bollinger",
+        mode="long_more",ema_fast=0, ema_slow=0,user_dmi=False,
+        start_date="20180920",don_start_date="20260629",initial_capital=40000,
+        data_source="akshare",
     ),
     ("06181.HK", "long_more"): dict(
         ts_code="06181.HK", stock_name="老铺", market="HK",
         mode="long_more", ema_fast=0, ema_slow=0, user_dmi=False,
-        start_date="20240628", end_date="20260624",
+        start_date="20240628", don_start_date="20260122",
         initial_capital=200000,
     ),
     ("00700.HK", "long_more"): dict(
@@ -175,6 +177,12 @@ STOCK_CONFIGS = {
         mode="long_more", ema_fast=0, ema_slow=0, user_dmi=False,
         start_date="20160704",
         initial_capital=200000,
+    ),
+    ("01810.HK", "long_more"): dict(
+        ts_code="01810.HK", stock_name="小米", market="HK",
+        mode="long_more",ema_fast=0, ema_slow=0,user_dmi=False,
+        start_date="20180709",don_start_date="20180806", initial_capital=40000,
+        data_source="akshare",
     ),
 }
 

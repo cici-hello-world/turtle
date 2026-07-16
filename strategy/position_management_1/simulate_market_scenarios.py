@@ -115,8 +115,8 @@ _ALL_BEST_PARAMS = {
         pm_add_pct=0.52, pm_adx_threshold=35, pm_agg_k=1,
     ),
     "01810.HK": dict(  # 小米
-        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.69,
-        pm_add_pct=0.33, pm_adx_threshold=26, pm_agg_k=1,
+        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.70,
+        pm_add_pct=0.36, pm_adx_threshold=27, pm_agg_k=1,
     ),
     "000625.SZ": dict(  # 长安
         pm_grid_down=0.08, pm_grid_up=0.028, pm_reduce_pct=0.66,

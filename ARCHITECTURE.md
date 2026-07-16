@@ -55,7 +55,7 @@ BacktestConfig (@dataclass)
 ├── 策略参数
 │   ├── entry_period: int = 20  # 入场通道周期
 │   ├── exit_period: int = 10   # 出场通道周期
-│   ├── atr_period: int = 14    # ATR 周期
+│   ├── atr_period: int = 20    # ATR 周期
 │   ├── n_value: float = 2.0    # 止损 ATR 倍数
 │   ├── risk_percent: float = 1.0  # 单笔风险%
 │   └── initial_capital: float = 200000

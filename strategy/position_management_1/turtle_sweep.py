@@ -99,12 +99,12 @@ _ALL_BASE_KWARGS = {
 
 _ALL_OPTIMAL_PARAMS = {
     "09992.HK": dict(  # 泡泡玛特
-        pm_grid_down=0.1,pm_grid_up=0.05,pm_reduce_pct=0.75,
-        pm_add_pct=0.5,pm_adx_threshold=30,pm_agg_k=1,
+        pm_grid_down=0.15,pm_grid_up=0.065,pm_reduce_pct=0.67,
+        pm_add_pct=0.42,pm_adx_threshold=37,pm_agg_k=1,
     ),
     "03690.HK": dict(  # 美团
-        pm_grid_down=0.10, pm_grid_up=0.027, pm_reduce_pct=0.57,
-        pm_add_pct=0.52, pm_adx_threshold=35, pm_agg_k=1,
+        pm_grid_down=0.10, pm_grid_up=0.039, pm_reduce_pct=0.51,
+        pm_add_pct=0.5, pm_adx_threshold=35, pm_agg_k=1,
     ),
     "02015.HK": dict(  # 理想
         pm_grid_down=0.05, pm_grid_up=0.04, pm_reduce_pct=0.75,
@@ -115,8 +115,8 @@ _ALL_OPTIMAL_PARAMS = {
         pm_add_pct=0.50, pm_adx_threshold=30, pm_agg_k=0.8,
     ),
     "01810.HK": dict(  # 小米
-        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.69,
-        pm_add_pct=0.33, pm_adx_threshold=26, pm_agg_k=1,
+        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.70,
+        pm_add_pct=0.36, pm_adx_threshold=27, pm_agg_k=1,
     ),
     "000625.SZ": dict(  # 长安
         pm_grid_down=0.08, pm_grid_up=0.028, pm_reduce_pct=0.66,
@@ -150,27 +150,27 @@ SCORING_CONFIG = {
         ),
     ),
     "09992.HK": dict(  # 泡泡玛特
-        weights=dict(excess=0.3683, robust_sharpe=0.3774, r_cubed=0.2542),
+        weights=dict(excess=0.37, robust_sharpe=0.34, r_cubed=0.29),
         scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=0.2470, intercept=32.4266),
-            robust_sharpe=dict(type="linear_quantile", slope=75.5985, intercept=0.5018),
-            r_cubed=dict(type="linear_quantile", slope=22.7819, intercept=2.4940),
+            excess=dict(type="linear_quantile", slope=0.23, intercept=40.31),
+            robust_sharpe=dict(type="linear_quantile", slope=64.75, intercept=10.18),
+            r_cubed=dict(type="linear_quantile", slope=19.61, intercept=8.33),
         ),
     ),
     "03690.HK": dict(  # 美团
-        weights=dict(excess=0.361, robust_sharpe=0.207, r_cubed=0.4319),
+        weights=dict(excess=0.354, robust_sharpe=0.207, r_cubed=0.257),
         scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=0.52, intercept=25.24),
-            robust_sharpe=dict(type="linear_quantile", slope=94.64, intercept=5.95),
-            r_cubed=dict(type="linear_quantile", slope=52.31, intercept=5.52),
+            excess=dict(type="linear_quantile", slope=0.18, intercept=9.59),
+            robust_sharpe=dict(type="linear_quantile", slope=75, intercept=-7),
+            r_cubed=dict(type="linear_quantile", slope=38.78, intercept=-4.67),
         ),
     ),
     "01810.HK": dict(  # 小米
-        weights=dict(excess=0.3461, robust_sharpe=0.3455, r_cubed=0.3084),
+        weights=dict(excess=0.462, robust_sharpe=0.349, r_cubed=0.189),
         scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=0.5386, intercept=37.3214),
-            robust_sharpe=dict(type="linear_quantile", slope=132.3529, intercept=5.0),
-            r_cubed=dict(type="linear_quantile", slope=187.1102, intercept=3.2225),
+            excess=dict(type="linear_quantile", slope=0.48, intercept=60.24),
+            robust_sharpe=dict(type="linear_quantile", slope=169.81, intercept=1.60),
+            r_cubed=dict(type="linear_quantile", slope=219.51, intercept=-1.59),
         ),
     ),
     "06181.HK": dict(  # 老铺
