@@ -29,7 +29,7 @@ class BacktestConfig:
     # ========== 策略参数 ==========
     entry_period: int = 20
     exit_period: int = 10
-    atr_period: int = 20
+    atr_period: int = 14
     n_value: float = 2.0  # 止损 ATR 倍数
     risk_percent: float = 1.0  # 单笔风险 %
     initial_capital: float = 200000.0

@@ -91,7 +91,7 @@ _ALL_BASE_KWARGS = {
     ),
     "01810.HK": dict(  # 小米
         ts_code="01810.HK", stock_name="小米", market="HK",
-        mode="position_management_1",
+        mode="position_management_1",per_shares=200,
         pm_start_date="20180806", start_date="20180709",
         user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
         pm_dynamic_position=False,ema_fast=0,ema_slow=0,
@@ -100,7 +100,7 @@ _ALL_BASE_KWARGS = {
     ),
     "000625.SZ": dict(  # 长安
         ts_code="000625.SZ", stock_name="长安", market="A",
-        mode="position_management_1",
+        mode="position_management_1",per_shares=100,
         pm_start_date="20160729", start_date="20160701",
         user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
         pm_dynamic_position=False,ema_fast=0,ema_slow=0,
@@ -190,11 +190,11 @@ WORKERS = max(1, multiprocessing.cpu_count() - 1)
 
 # 固定熵权 — key 为 ts_code，通过 get_scoring_weights(ts_code) 获取
 SCORING_WEIGHTS = {
-    "02015.HK": dict(excess=0.4186, robust_sharpe=0.2906, r_cubed=0.2907),  # 理想
-    "09992.HK": dict(excess=0.37, robust_sharpe=0.34, r_cubed=0.29),  # 泡泡玛特
-    "01810.HK": dict(excess=0.462, robust_sharpe=0.349, r_cubed=0.189),  # 小米
-    "06181.HK": dict(excess=0.3438, robust_sharpe=0.3311, r_cubed=0.3251),  # 老铺
-    "03690.HK": dict(excess=0.354, robust_sharpe=0.207, r_cubed=0.257),    # 美团
+    "02015.HK": dict(excess=0.449,  robust_sharpe=0.271,  r_cubed=0.281),  # 理想
+    "09992.HK": dict(excess=0.376,  robust_sharpe=0.340,  r_cubed=0.285),  # 泡泡玛特
+    "01810.HK": dict(excess=0.395,  robust_sharpe=0.394,  r_cubed=0.211),  # 小米
+    "06181.HK": dict(excess=0.392,  robust_sharpe=0.323,  r_cubed=0.285),  # 老铺
+    "03690.HK": dict(excess=0.332,  robust_sharpe=0.407,  r_cubed=0.261),    # 美团
     "000625.SZ": dict(excess=0.3764, robust_sharpe=0.3358, r_cubed=0.2878),    # 长安
 }
 
@@ -618,8 +618,8 @@ def main():
     # Stage B: 真实滚动窗口回测
     # ═══════════════════════════════════════════════════════
     WINDOW_BARS = 252
-    STEP_BARS = 20
-    WARMUP = 60
+    STEP_BARS = 10
+    WARMUP = 20
 
     dates = pd.to_datetime(df_base["Date"])
     n = len(df_base)

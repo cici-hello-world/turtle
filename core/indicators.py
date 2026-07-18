@@ -32,7 +32,7 @@ def compute_indicators(
     df: pd.DataFrame,
     entry_period: int = 20,
     exit_period: int = 10,
-    atr_period: int = 20,
+    atr_period: int = 14,
     ema_fast: int = 40,
     ema_slow: int = 200,
     channel_type: str = "donchian",

@@ -84,7 +84,7 @@ _ALL_BASE_KWARGS = {
         ema_slow=0, ema_fast=0, pm_initial_shares=8,
         initial_capital=40000, user_dmi=True,
         pm_dynamic_position=False, pm_adaptive_grid=False,
-        per_shares=100, data_source="akshare",
+        per_shares=200, data_source="akshare",
     ),
     "000625.SZ": dict(  # 长安
         ts_code="000625.SZ", stock_name="长安", market="A",
@@ -99,24 +99,24 @@ _ALL_BASE_KWARGS = {
 
 _ALL_BEST_PARAMS = {
     "06181.HK": dict(  # 老铺
-        pm_grid_down=0.045, pm_grid_up=0.044, pm_reduce_pct=0.46,
-        pm_add_pct=0.4, pm_adx_threshold=32, pm_agg_k=0.76,
+        pm_grid_down=0.075, pm_grid_up=0.05, pm_reduce_pct=0.75,
+        pm_add_pct=0.50, pm_adx_threshold=36, pm_agg_k=0.9,
     ),
     "02015.HK": dict(  # 理想
-        pm_grid_down=0.05, pm_grid_up=0.04, pm_reduce_pct=0.75,
-        pm_add_pct=0.50, pm_adx_threshold=24, pm_agg_k=1,
+        pm_grid_down=0.05, pm_grid_up=0.039, pm_reduce_pct=0.75,
+        pm_add_pct=0.510, pm_adx_threshold=24, pm_agg_k=1,
     ),
     "09992.HK": dict(  # 泡泡玛特
-        pm_grid_down=0.14, pm_grid_up=0.055, pm_reduce_pct=0.75,
-        pm_add_pct=0.5, pm_adx_threshold=31, pm_agg_k=1,
+        pm_grid_down=0.15,pm_grid_up=0.038,pm_reduce_pct=0.79,
+        pm_add_pct=0.50,pm_adx_threshold=21,pm_agg_k=1,
     ),
     "03690.HK": dict(  # 美团
-        pm_grid_down=0.10, pm_grid_up=0.027, pm_reduce_pct=0.57,
-        pm_add_pct=0.52, pm_adx_threshold=35, pm_agg_k=1,
+        pm_grid_down=0.105, pm_grid_up=0.039, pm_reduce_pct=0.52,
+        pm_add_pct=0.5, pm_adx_threshold=35, pm_agg_k=1,
     ),
     "01810.HK": dict(  # 小米
-        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.70,
-        pm_add_pct=0.36, pm_adx_threshold=27, pm_agg_k=1,
+        pm_grid_down=0.14, pm_grid_up=0.029, pm_reduce_pct=0.35,
+        pm_add_pct=0.29, pm_adx_threshold=25, pm_agg_k=1,
     ),
     "000625.SZ": dict(  # 长安
         pm_grid_down=0.08, pm_grid_up=0.028, pm_reduce_pct=0.66,

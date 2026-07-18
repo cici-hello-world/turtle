@@ -50,7 +50,7 @@ DEFAULT_PARAM_SPACE = {
     "pm_reduce_pct":     (0.30, 0.80),
     "pm_add_pct":        (0.20, 0.60),
     "pm_adx_threshold":  (15, 50),
-    "pm_agg_k":          (1.0, 1.0),
+    "pm_agg_k":          (0.5, 1.0),
 }
 
 
@@ -371,7 +371,7 @@ _ALL_BASE_KWARGS = {
         user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=2, initial_capital=40000,
-        data_source="tushare",
+        data_source="tushare",atr_period=14,
     ),
     "03690.HK": dict(  # 美团
         ts_code="03690.HK", stock_name="美团", market="HK",
@@ -395,14 +395,14 @@ _ALL_BASE_KWARGS = {
         ts_code="06181.HK", stock_name="老铺", market="HK",
         mode="position_management_1", per_shares=100,
         start_date="20240628", pm_start_date="20240729",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=3, initial_capital=40000,
         data_source="tushare",
     ),
     "01810.HK": dict(  # 小米
         ts_code="01810.HK", stock_name="小米", market="HK",
-        mode="position_management_1",
+        mode="position_management_1",per_shares=200,
         start_date="20180709", pm_start_date="20180806",
         user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
@@ -411,7 +411,7 @@ _ALL_BASE_KWARGS = {
     ),
     "00700.HK": dict(  # 腾讯
             ts_code="00700.HK", stock_name="腾讯", market="HK",
-            mode="position_management_1",
+            mode="position_management_1",per_shares=100,
             start_date="20040616", pm_start_date="20040816",
             user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
             pm_dynamic_position=False, ema_fast=0, ema_slow=0,
@@ -420,7 +420,7 @@ _ALL_BASE_KWARGS = {
     ),
     "000625.SZ": dict(  # 长安
             ts_code="000625.SZ", stock_name="长安", market="A",
-            mode="position_management_1",
+            mode="position_management_1",per_shares=100,
             start_date="20160701", pm_start_date="20160729",
             user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
             pm_dynamic_position=False, ema_fast=0, ema_slow=0,

@@ -197,6 +197,9 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
     """
     empty_result = {
         "总交易": 0,
+        "donchian交易":0,
+        "donchian盈利次数":0,
+        "donchian强制平仓":0,
         "胜率 (%)": 0,
         "赔率": 0,
         "期望收益率": 0,
@@ -258,6 +261,22 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
 
     wins = df_trades[df_trades["PnL_%"] > 0]
     losses = df_trades[df_trades["PnL_%"] < 0]
+    donchian_mask = df_trades["Reason"].str.contains("Donchian买入", na=False)
+    donchian_trades = int(donchian_mask.sum())
+    # Donchian 盈利次数：Donchian买入行 + 下一行（减仓）的 Amount 之和 > 0
+    donchian_idx = df_trades.index[donchian_mask]
+    donchian_wins = 0
+    donchian_forced = 0
+    for idx in donchian_idx:
+        # 找到该索引在 df_trades 中的位置
+        pos = df_trades.index.get_loc(idx)
+        if pos + 1 < len(df_trades):
+            entry_amount = df_trades.iloc[pos]["Amount"]
+            exit_amount = df_trades.iloc[pos + 1]["Amount"]
+            if entry_amount + exit_amount > 0:
+                donchian_wins += 1
+            if df_trades.iloc[pos + 1]["Reason"] == "强制平仓":
+                donchian_forced += 1
     total_trades = len(df_trades)
     win_count = len(wins)
     loss_count = len(losses)
@@ -328,6 +347,9 @@ def calc_stats(trades: list[dict], initial_capital: float, equity_curve: list[fl
 
     return {
         "总交易": total_trades,
+        "donchian交易": donchian_trades,
+        "donchian盈利次数": donchian_wins,
+        "donchian强制平仓": donchian_forced,
         "胜率 (%)": round(win_rate, 2),
         "赔率": win_loss_ratio,
         "期望收益率": expectation,

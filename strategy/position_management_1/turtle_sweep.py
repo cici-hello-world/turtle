@@ -79,7 +79,7 @@ _ALL_BASE_KWARGS = {
         ),
     "01810.HK": dict(  # 小米
         ts_code="01810.HK", stock_name="小米", market="HK",
-        mode="position_management_1",
+        mode="position_management_1",per_shares=200,
         pm_start_date="20180806", start_date="20180709",
         user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
         pm_dynamic_position=False,ema_fast=0,ema_slow=0,
@@ -88,7 +88,7 @@ _ALL_BASE_KWARGS = {
     ),
     "000625.SZ": dict(  # 长安
         ts_code="000625.SZ", stock_name="长安", market="A",
-        mode="position_management_1",
+        mode="position_management_1",per_shares=100,
         pm_start_date="20160729", start_date="20160701",
         user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
         pm_dynamic_position=False,ema_fast=0,ema_slow=0,
@@ -99,24 +99,24 @@ _ALL_BASE_KWARGS = {
 
 _ALL_OPTIMAL_PARAMS = {
     "09992.HK": dict(  # 泡泡玛特
-        pm_grid_down=0.15,pm_grid_up=0.065,pm_reduce_pct=0.67,
-        pm_add_pct=0.42,pm_adx_threshold=37,pm_agg_k=1,
+        pm_grid_down=0.15,pm_grid_up=0.038,pm_reduce_pct=0.79,
+        pm_add_pct=0.50,pm_adx_threshold=21,pm_agg_k=1,
     ),
     "03690.HK": dict(  # 美团
-        pm_grid_down=0.10, pm_grid_up=0.039, pm_reduce_pct=0.51,
+        pm_grid_down=0.105, pm_grid_up=0.039, pm_reduce_pct=0.52,
         pm_add_pct=0.5, pm_adx_threshold=35, pm_agg_k=1,
     ),
     "02015.HK": dict(  # 理想
-        pm_grid_down=0.05, pm_grid_up=0.04, pm_reduce_pct=0.75,
-        pm_add_pct=0.50, pm_adx_threshold=24, pm_agg_k=1,
+        pm_grid_down=0.05, pm_grid_up=0.039, pm_reduce_pct=0.75,
+        pm_add_pct=0.510, pm_adx_threshold=24, pm_agg_k=1,
     ),
     "06181.HK": dict(  # 老铺
-        pm_grid_down=0.1, pm_grid_up=0.028, pm_reduce_pct=0.75,
-        pm_add_pct=0.50, pm_adx_threshold=30, pm_agg_k=0.8,
+        pm_grid_down=0.075, pm_grid_up=0.05, pm_reduce_pct=0.75,
+        pm_add_pct=0.50, pm_adx_threshold=36, pm_agg_k=0.9,
     ),
     "01810.HK": dict(  # 小米
-        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.70,
-        pm_add_pct=0.36, pm_adx_threshold=27, pm_agg_k=1,
+        pm_grid_down=0.14, pm_grid_up=0.029, pm_reduce_pct=0.35,
+        pm_add_pct=0.29, pm_adx_threshold=25, pm_agg_k=1,
     ),
     "000625.SZ": dict(  # 长安
         pm_grid_down=0.08, pm_grid_up=0.028, pm_reduce_pct=0.66,
@@ -142,43 +142,43 @@ def init_config(ts_code: str):
 # 绝对评分配置 — key 为 ts_code，通过 get_scorer(ts_code) 获取
 SCORING_CONFIG = {
     "02015.HK": dict(  # 理想
-        weights=dict(excess=0.4267, robust_sharpe=0.3056, r_cubed=0.2677),
+        weights=dict(excess=0.449,  robust_sharpe=0.271,  r_cubed=0.281),
         scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=2.0831, intercept=-7.6963),
-            robust_sharpe=dict(type="linear_quantile", slope=236.8421, intercept=61.8421),
-            r_cubed=dict(type="linear_quantile", slope=113.8520, intercept=63.0645),
+            excess=dict(type="linear_quantile", slope=2.11, intercept=-13.20),
+            robust_sharpe=dict(type="linear_quantile", slope=225.0, intercept=56.75),
+            r_cubed=dict(type="linear_quantile", slope=124.91, intercept=49.97),
         ),
     ),
     "09992.HK": dict(  # 泡泡玛特
-        weights=dict(excess=0.37, robust_sharpe=0.34, r_cubed=0.29),
+        weights=dict(excess=0.376,  robust_sharpe=0.340,  r_cubed=0.285),
         scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=0.23, intercept=40.31),
-            robust_sharpe=dict(type="linear_quantile", slope=64.75, intercept=10.18),
-            r_cubed=dict(type="linear_quantile", slope=19.61, intercept=8.33),
+            excess=dict(type="linear_quantile", slope=0.22, intercept=39.17),
+            robust_sharpe=dict(type="linear_quantile", slope=63.83, intercept=11.38),
+            r_cubed=dict(type="linear_quantile", slope=19.52, intercept=8.32),
         ),
     ),
     "03690.HK": dict(  # 美团
-        weights=dict(excess=0.354, robust_sharpe=0.207, r_cubed=0.257),
+        weights=dict(excess=0.332,  robust_sharpe=0.407,  r_cubed=0.261),
         scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=0.18, intercept=9.59),
-            robust_sharpe=dict(type="linear_quantile", slope=75, intercept=-7),
-            r_cubed=dict(type="linear_quantile", slope=38.78, intercept=-4.67),
+            excess=dict(type="linear_quantile", slope=0.20, intercept=3.05),
+            robust_sharpe=dict(type="linear_quantile", slope=78.95, intercept=-10.0),
+            r_cubed=dict(type="linear_quantile", slope=42.21, intercept=-5.13),
         ),
     ),
     "01810.HK": dict(  # 小米
-        weights=dict(excess=0.462, robust_sharpe=0.349, r_cubed=0.189),
+        weights=dict(excess=0.395,  robust_sharpe=0.394,  r_cubed=0.211),
         scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=0.48, intercept=60.24),
-            robust_sharpe=dict(type="linear_quantile", slope=169.81, intercept=1.60),
-            r_cubed=dict(type="linear_quantile", slope=219.51, intercept=-1.59),
+            excess=dict(type="linear_quantile", slope=0.58, intercept=58.65),
+            robust_sharpe=dict(type="linear_quantile", slope=157.89, intercept=3.42),
+            r_cubed=dict(type="linear_quantile", slope=236.84, intercept=2.63),
         ),
     ),
     "06181.HK": dict(  # 老铺
-        weights=dict(excess=0.3438, robust_sharpe=0.3311, r_cubed=0.3251),
+        weights=dict(excess=0.392,  robust_sharpe=0.323,  r_cubed=0.285),
         scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=1.3551, intercept=474.5682),
-            robust_sharpe=dict(type="linear_quantile", slope=115.3846, intercept=-31.9231),
-            r_cubed=dict(type="linear_quantile", slope=4.8932, intercept=-12.5665),
+            excess=dict(type="linear_quantile", slope=1.46, intercept=450.43),
+            robust_sharpe=dict(type="linear_quantile", slope=118.42, intercept=-31.71),
+            r_cubed=dict(type="linear_quantile", slope=5.07, intercept=-11.78),
         ),
     ),
     "000625.SZ": dict(  # 长安
@@ -213,7 +213,7 @@ SWEEP_DEFS = {
         "label": PARAM_LABELS.get("pm_reduce_pct", "pm_reduce_pct"),
     },
     "pm_add_pct": {
-        "values": [0.20,0.21,0.22,0.23,0.24,0.25,0.26,0.27,0.28,0.29,0.30,0.31,0.32,0.33,0.34,0.35,0.36,0.37,0.38,0.39,0.40,0.41,0.42,0.43,0.44,0.45,0.046,0.047,0.048,0.049,0.50,0.51,0.52,0.53,0.54,0.55],
+        "values": [0.20,0.21,0.22,0.23,0.24,0.25,0.26,0.27,0.28,0.29,0.30,0.31,0.32,0.33,0.34,0.35,0.36,0.37,0.38,0.39,0.40,0.41,0.42,0.43,0.44,0.45,0.46,0.47,0.48,0.49,0.50,0.51,0.52,0.53,0.54,0.55],
         "label": PARAM_LABELS.get("pm_add_pct", "pm_add_pct"),
     },
     "pm_adx_threshold": {
@@ -228,8 +228,8 @@ SWEEP_DEFS = {
 
 # 滚动窗口参数
 WINDOW_BARS = 252
-STEP_BARS = 20
-WARMUP = 60
+STEP_BARS = 10
+WARMUP = 20
 
 # 并行工作进程数
 WORKERS = max(1, multiprocessing.cpu_count() - 1)
@@ -680,6 +680,9 @@ def main():
         ("夏普比率", "夏普比率"),
         ("胜率 (%)", "胜率 (%)"),
         ("总交易", "总交易"),
+        ("donchian交易", "donchian交易"),
+        ("donchian盈利次数", "donchian盈利次数"),
+        ("donchian强制平仓", "donchian强制平仓"),
         ("R平方", "R平方"),
         ("MAR比率", "MAR比率"),
     ]
