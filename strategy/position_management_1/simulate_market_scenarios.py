@@ -81,7 +81,7 @@ _ALL_BASE_KWARGS = {
     "01810.HK": dict(  # 小米
         ts_code="01810.HK", stock_name="小米", market="HK",
         mode="position_management_1", pm_start_date="20260629",
-        ema_slow=0, ema_fast=0, pm_initial_shares=8,
+        ema_slow=0, ema_fast=0, pm_initial_shares=4,
         initial_capital=40000, user_dmi=True,
         pm_dynamic_position=False, pm_adaptive_grid=False,
         per_shares=200, data_source="akshare",
@@ -115,8 +115,8 @@ _ALL_BEST_PARAMS = {
         pm_add_pct=0.5, pm_adx_threshold=35, pm_agg_k=1,
     ),
     "01810.HK": dict(  # 小米
-        pm_grid_down=0.14, pm_grid_up=0.029, pm_reduce_pct=0.35,
-        pm_add_pct=0.29, pm_adx_threshold=25, pm_agg_k=1,
+        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.56,
+        pm_add_pct=0.33, pm_adx_threshold=27, pm_agg_k=1,
     ),
     "000625.SZ": dict(  # 长安
         pm_grid_down=0.08, pm_grid_up=0.028, pm_reduce_pct=0.66,

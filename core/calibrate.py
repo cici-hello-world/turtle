@@ -50,7 +50,7 @@ DEFAULT_PARAM_SPACE = {
     "pm_reduce_pct":     (0.30, 0.80),
     "pm_add_pct":        (0.20, 0.60),
     "pm_adx_threshold":  (15, 50),
-    "pm_agg_k":          (0.5, 1.0),
+    "pm_agg_k":          (1.0, 1.0),
 }
 
 
@@ -406,7 +406,7 @@ _ALL_BASE_KWARGS = {
         start_date="20180709", pm_start_date="20180806",
         user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=8, initial_capital=40000,
+        pm_initial_shares=4, initial_capital=40000,
         data_source="tushare",
     ),
     "00700.HK": dict(  # 腾讯

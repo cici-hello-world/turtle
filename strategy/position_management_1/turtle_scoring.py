@@ -95,7 +95,7 @@ _ALL_BASE_KWARGS = {
         pm_start_date="20180806", start_date="20180709",
         user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
         pm_dynamic_position=False,ema_fast=0,ema_slow=0,
-        pm_initial_shares=8, initial_capital=40000,
+        pm_initial_shares=4, initial_capital=40000,
         data_source="tushare",
     ),
     "000625.SZ": dict(  # 长安
@@ -192,7 +192,7 @@ WORKERS = max(1, multiprocessing.cpu_count() - 1)
 SCORING_WEIGHTS = {
     "02015.HK": dict(excess=0.449,  robust_sharpe=0.271,  r_cubed=0.281),  # 理想
     "09992.HK": dict(excess=0.376,  robust_sharpe=0.340,  r_cubed=0.285),  # 泡泡玛特
-    "01810.HK": dict(excess=0.395,  robust_sharpe=0.394,  r_cubed=0.211),  # 小米
+    "01810.HK": dict(excess=0.404,  robust_sharpe=0.411,  r_cubed=0.185),  # 小米
     "06181.HK": dict(excess=0.392,  robust_sharpe=0.323,  r_cubed=0.285),  # 老铺
     "03690.HK": dict(excess=0.332,  robust_sharpe=0.407,  r_cubed=0.261),    # 美团
     "000625.SZ": dict(excess=0.3764, robust_sharpe=0.3358, r_cubed=0.2878),    # 长安
