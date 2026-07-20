@@ -62,8 +62,8 @@ _ALL_BASE_KWARGS = {
     "02015.HK": dict(  # 理想
         ts_code="02015.HK", stock_name="理想", market="HK",
         mode="position_management_1", per_shares=100,
-        pm_start_date="20220913", start_date="20220813",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+        pm_start_date="20210909", start_date="20210812",
+        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=25, initial_capital=40000,
         data_source="tushare",
@@ -107,8 +107,8 @@ _ALL_OPTIMAL_PARAMS = {
         pm_add_pct=0.5, pm_adx_threshold=35, pm_agg_k=1,
     ),
     "02015.HK": dict(  # 理想
-        pm_grid_down=0.05, pm_grid_up=0.039, pm_reduce_pct=0.75,
-        pm_add_pct=0.510, pm_adx_threshold=24, pm_agg_k=1,
+        pm_grid_down=0.12, pm_grid_up=0.027, pm_reduce_pct=0.51,
+        pm_add_pct=0.48, pm_adx_threshold=36, pm_agg_k=1,
     ),
     "06181.HK": dict(  # 老铺
         pm_grid_down=0.075, pm_grid_up=0.05, pm_reduce_pct=0.75,
@@ -142,11 +142,11 @@ def init_config(ts_code: str):
 # 绝对评分配置 — key 为 ts_code，通过 get_scorer(ts_code) 获取
 SCORING_CONFIG = {
     "02015.HK": dict(  # 理想
-        weights=dict(excess=0.449,  robust_sharpe=0.271,  r_cubed=0.281),
+        weights=dict(excess=0.387,  robust_sharpe=0.321,  r_cubed=0.293),
         scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=2.11, intercept=-13.20),
-            robust_sharpe=dict(type="linear_quantile", slope=225.0, intercept=56.75),
-            r_cubed=dict(type="linear_quantile", slope=124.91, intercept=49.97),
+            excess=dict(type="linear_quantile", slope=1.89, intercept=-78.73),
+            robust_sharpe=dict(type="linear_quantile", slope=183.67, intercept=25.20),
+            r_cubed=dict(type="linear_quantile", slope=11.04, intercept=6.66),
         ),
     ),
     "09992.HK": dict(  # 泡泡玛特

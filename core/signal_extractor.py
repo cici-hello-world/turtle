@@ -54,6 +54,9 @@ class DailySignal:
     dmi_blocked: bool
     today_close: float
 
+    # 超额收益（策略收益 - 个股买入持有收益）
+    excess_return: float | None
+
 
 def extract_signal(config: BacktestConfig) -> DailySignal | None:
     """加载数据 → 计算指标 → 回测 → 提取下一交易日仓位信号。
@@ -101,7 +104,7 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
 
     # 3. 运行回测，取最后持仓状态
     try:
-        trades, _, _ = run_backtest(df, config)
+        trades, equity_curve, _ = run_backtest(df, config)
     except Exception as e:
         print(f"[signal] {config.stock_name} 回测失败: {e}")
         return None
@@ -126,6 +129,14 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
     # 6. 持仓状态
     if trades:
         last = trades[-1]
+        # 如果最后一笔交易是强制平仓，往前取最近一笔非强平的真实交易
+        if last.get("Reason") == "强制平仓":
+            real_trades = [t for t in trades if t.get("Reason") != "强制平仓"]
+            last = real_trades[-1] if real_trades else None
+    else:
+        last = None
+
+    if last is not None:
         current_lots = int(last.get("Position_After", 0))
         reference_price = float(last.get("Reference_Price", 0))
         last_trade_date = str(last.get("Date", ""))[:10]
@@ -143,6 +154,27 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         last_equity = config.initial_capital + current_lots * reference_price * config.per_shares
 
     current_shares = current_lots * config.per_shares
+
+    # 6.5 超额收益：策略收益 - 个股同期买入持有收益
+    try:
+        if equity_curve and len(equity_curve) >= 2:
+            strategy_return = (equity_curve[-1] / equity_curve[0] - 1) * 100
+        else:
+            strategy_return = 0.0
+
+        if config.pm_start_date:
+            start_date = pd.to_datetime(config.pm_start_date)
+            mask = pd.to_datetime(df["Date"]) >= start_date
+            if mask.any():
+                start_close = float(df.loc[mask, "Close"].iloc[0])
+                bh_return = (today_close / start_close - 1) * 100
+                excess_return = round(strategy_return - bh_return, 2)
+            else:
+                excess_return = None
+        else:
+            excess_return = None
+    except Exception:
+        excess_return = None
 
     # 7. 触发价
     add_trigger = round(reference_price * (1 - eff_down), 2)
@@ -189,6 +221,7 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         today_close=today_close,
         last_type=last_type,
         last_shares=last_shares,
+        excess_return=excess_return,
     )
 
 
@@ -236,6 +269,11 @@ def format_signal(s: DailySignal) -> str:
         f"  {dmi_detail}",
         f"  网格: 下{s.eff_grid_down*100:.1f}% 上{s.eff_grid_up*100:.1f}%",
     ]
+
+    # 超额收益
+    if s.excess_return is not None:
+        sign = "+" if s.excess_return >= 0 else ""
+        lines.append(f"  超额收益: {sign}{s.excess_return:.2f}%")
 
     # 触发信号
     dmi_tag = " ⚠️DMI拦截" if s.dmi_blocked else ""

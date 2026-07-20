@@ -1279,7 +1279,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
         # ---- Donchian 未触发或失败 → 尝试网格交易 ----
         if not donchian_done:
             # 空仓时市价已涨超一个卖出网格→追认当前价格，避免牛市踏空
-            if current_lots == 0 and close > reference_price * (1 + eff_grid_up):
+            if config.pm_adaptive and current_lots == 0 and close > reference_price * (1 + eff_grid_up):
                 reference_price = close
             # 非单边上涨/下跌时网格交易买入
             # 失效模式④修复：short C区(下跌酝酿)最危险(20日+0.52%)，不应允许买入

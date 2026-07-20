@@ -74,8 +74,8 @@ _ALL_BASE_KWARGS = {
     "02015.HK": dict(  # 理想
         ts_code="02015.HK", stock_name="理想", market="HK",
         mode="position_management_1", per_shares=100,
-        pm_start_date="20220913", start_date="20220813",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+        pm_start_date="20210909", start_date="20210812",
+        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=25, initial_capital=40000,
         data_source="tushare",
@@ -190,7 +190,7 @@ WORKERS = max(1, multiprocessing.cpu_count() - 1)
 
 # 固定熵权 — key 为 ts_code，通过 get_scoring_weights(ts_code) 获取
 SCORING_WEIGHTS = {
-    "02015.HK": dict(excess=0.449,  robust_sharpe=0.271,  r_cubed=0.281),  # 理想
+    "02015.HK": dict(excess=0.387,  robust_sharpe=0.321,  r_cubed=0.293),  # 理想
     "09992.HK": dict(excess=0.376,  robust_sharpe=0.340,  r_cubed=0.285),  # 泡泡玛特
     "01810.HK": dict(excess=0.404,  robust_sharpe=0.411,  r_cubed=0.185),  # 小米
     "06181.HK": dict(excess=0.392,  robust_sharpe=0.323,  r_cubed=0.285),  # 老铺

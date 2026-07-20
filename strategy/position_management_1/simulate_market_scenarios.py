@@ -58,7 +58,7 @@ _ALL_BASE_KWARGS = {
         ts_code="02015.HK", stock_name="理想", market="HK",
         mode="position_management_1", pm_start_date="20260629",
         ema_slow=0, ema_fast=0, pm_initial_shares=25,
-        initial_capital=40000, user_dmi=True,
+        initial_capital=40000, user_dmi=True, pm_adaptive = False,
         pm_dynamic_position=False, pm_adaptive_grid=False,
         per_shares=100, data_source="akshare",
     ),
@@ -103,8 +103,8 @@ _ALL_BEST_PARAMS = {
         pm_add_pct=0.50, pm_adx_threshold=36, pm_agg_k=0.9,
     ),
     "02015.HK": dict(  # 理想
-        pm_grid_down=0.05, pm_grid_up=0.039, pm_reduce_pct=0.75,
-        pm_add_pct=0.510, pm_adx_threshold=24, pm_agg_k=1,
+        pm_grid_down=0.12, pm_grid_up=0.027, pm_reduce_pct=0.51,
+        pm_add_pct=0.48, pm_adx_threshold=36, pm_agg_k=1,
     ),
     "09992.HK": dict(  # 泡泡玛特
         pm_grid_down=0.15,pm_grid_up=0.038,pm_reduce_pct=0.79,
