@@ -41,26 +41,11 @@ from core.data import fetch_data
 from core.indicators import compute_indicators
 from core.scoring import entropy_weights, compute_weights
 
-# ── 默认可行参数空间 ──
-# 边界足够宽，覆盖所有合理的参数组合
-# 运行时可用 --param-space 覆盖（提供 JSON 文件路径）
-DEFAULT_PARAM_SPACE = {
-    "pm_grid_down":      (0.04, 0.20),
-    "pm_grid_up":        (0.02, 0.12),
-    "pm_reduce_pct":     (0.30, 0.80),
-    "pm_add_pct":        (0.20, 0.60),
-    "pm_adx_threshold":  (15, 50),
-    "pm_agg_k":          (1.0, 1.0),
-}
-
-
-def _constraint_ok(params: dict) -> bool:
-    """参数约束检查：gd > gu 且 rp > ap"""
-    gd = params.get("pm_grid_down", 0)
-    gu = params.get("pm_grid_up", 0)
-    rp = params.get("pm_reduce_pct", 0)
-    ap = params.get("pm_add_pct", 0)
-    return gd > gu and rp > ap
+# 共享配置
+from strategy.position_management_1.common_config import (
+    DEFAULT_PARAM_SPACE, _constraint_ok, STOCKS,
+    init_config, update_scoring_config, BASE_KWARGS,
+)
 
 
 def latin_hypercube_sample(param_space: dict, n_samples: int,
@@ -362,84 +347,6 @@ def load_calibration(filepath: str) -> dict:
 # CLI — 独立运行校准
 # ═══════════════════════════════════════════════════════════════
 
-# 配置 — key 为 ts_code，通过 init_config(ts_code) 激活
-_ALL_BASE_KWARGS = {
-    "09992.HK": dict(  # 泡泡玛特
-        ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
-        mode="position_management_1", per_shares=200,
-        start_date="20201211", pm_start_date="20210112",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=2, initial_capital=40000,
-        data_source="tushare",atr_period=14,
-    ),
-    "03690.HK": dict(  # 美团
-        ts_code="03690.HK", stock_name="美团", market="HK",
-        mode="position_management_1", per_shares=100,
-        start_date="20181023", pm_start_date="20180920",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=2, initial_capital=40000,
-        data_source="tushare",
-    ),
-    "02015.HK": dict(  # 理想
-        ts_code="02015.HK", stock_name="理想", market="HK",
-        mode="position_management_1", per_shares=100,
-        start_date="20210812", pm_start_date="20210909",
-        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=25, initial_capital=40000,
-        data_source="tushare",
-    ),
-    "06181.HK": dict(  # 老铺
-        ts_code="06181.HK", stock_name="老铺", market="HK",
-        mode="position_management_1", per_shares=100,
-        start_date="20240628", pm_start_date="20240729",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=3, initial_capital=40000,
-        data_source="tushare",
-    ),
-    "01810.HK": dict(  # 小米
-        ts_code="01810.HK", stock_name="小米", market="HK",
-        mode="position_management_1",per_shares=200,
-        start_date="20180709", pm_start_date="20180806",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=4, initial_capital=40000,
-        data_source="tushare",
-    ),
-    "00700.HK": dict(  # 腾讯
-            ts_code="00700.HK", stock_name="腾讯", market="HK",
-            mode="position_management_1",per_shares=100,
-            start_date="20040616", pm_start_date="20040816",
-            user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-            pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-            pm_initial_shares=0, initial_capital=60000,
-            data_source="tushare",
-    ),
-    "000625.SZ": dict(  # 长安
-            ts_code="000625.SZ", stock_name="长安", market="A",
-            mode="position_management_1",per_shares=100,
-            start_date="20160701", pm_start_date="20160729",
-            user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-            pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-            pm_initial_shares=9, initial_capital=40000,
-            data_source="tushare",
-    ),
-}
-
-BASE_KWARGS = None
-
-
-def init_config(ts_code: str):
-    """根据 ts_code 激活对应的 BASE_KWARGS。"""
-    global BASE_KWARGS
-    if ts_code not in _ALL_BASE_KWARGS:
-        raise KeyError(f"未配置 {ts_code} 的 BASE_KWARGS，请在 _ALL_BASE_KWARGS 中添加")
-    BASE_KWARGS = _ALL_BASE_KWARGS[ts_code]
-
-
 def main():
     import argparse
     parser = argparse.ArgumentParser(
@@ -505,6 +412,9 @@ def main():
         PROJECT_ROOT, "result",
         f"calibration_{args.ts_code.replace('.', '_')}.json")
     save_calibration(calibration, output_path)
+
+    # ── 自动更新共享评分配置 ──
+    update_scoring_config(args.ts_code, calibration)
 
     print(f"\n✅ 校准完成！后续脚本可使用:")
     print(f"   --calibration-file {output_path}")

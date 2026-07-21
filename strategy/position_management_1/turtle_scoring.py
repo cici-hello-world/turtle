@@ -39,7 +39,7 @@ from core.scoring import (compute_percentile_scores,
 
 # 复用已有函数
 from strategy.position_management_1.turtle_optimize import (
-    run_one_backtest, _constraint_ok, _map_stats_keys,
+    run_one_backtest, _map_stats_keys,
 )
 from strategy.position_management_1.grid_search_pm import (
     prepare_scenario_dfs, SCENARIO_LABEL_MAP, get_scenario_probs,
@@ -49,161 +49,34 @@ from strategy.position_management_1.simulate_market_scenarios import (
 )
 
 # ═══════════════════════════════════════════════════════════════
-# 配置 — key 为 ts_code，通过 init_config(ts_code) 激活
+# 配置 — 全部从共享配置加载
 # ═══════════════════════════════════════════════════════════════
 
-_ALL_BASE_KWARGS = {
-    "09992.HK": dict(  # 泡泡玛特
-        ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
-        mode="position_management_1", per_shares=200,
-        start_date="20201211", pm_start_date="20210112",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=2, initial_capital=40000,
-        data_source="tushare",
-    ),
-    "03690.HK": dict(  # 美团
-        ts_code="03690.HK", stock_name="美团", market="HK",
-        mode="position_management_1", per_shares=100,
-        start_date="20181023", pm_start_date="20180920",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=2, initial_capital=40000,
-        data_source="tushare",
-    ),
-    "02015.HK": dict(  # 理想
-        ts_code="02015.HK", stock_name="理想", market="HK",
-        mode="position_management_1", per_shares=100,
-        pm_start_date="20210909", start_date="20210812",
-        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=25, initial_capital=40000,
-        data_source="tushare",
-    ),
-    "06181.HK": dict(  # 老铺
-        ts_code="06181.HK",stock_name="老铺",market="HK",
-        mode="position_management_1",per_shares=100,
-        pm_start_date="20240729",start_date="20240628",
-        user_dmi=True,pm_adaptive=True,pm_adaptive_grid=True,
-        pm_dynamic_position=False,ema_fast=0,ema_slow=0,
-        pm_initial_shares=3,initial_capital=40000,
-        data_source="tushare",
-    ),
-    "01810.HK": dict(  # 小米
-        ts_code="01810.HK", stock_name="小米", market="HK",
-        mode="position_management_1",per_shares=200,
-        pm_start_date="20180806", start_date="20180709",
-        user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
-        pm_dynamic_position=False,ema_fast=0,ema_slow=0,
-        pm_initial_shares=4, initial_capital=40000,
-        data_source="tushare",
-    ),
-    "000625.SZ": dict(  # 长安
-        ts_code="000625.SZ", stock_name="长安", market="A",
-        mode="position_management_1",per_shares=100,
-        pm_start_date="20160729", start_date="20160701",
-        user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
-        pm_dynamic_position=False,ema_fast=0,ema_slow=0,
-        pm_initial_shares=9, initial_capital=40000,
-        data_source="tushare",
-    ),
+from strategy.position_management_1 import common_config
 
-}
-
-_ALL_SWEEP_RANGES = {
-    "09992.HK": {
-        "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
-        "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
-        "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
-        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
-        "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [1.0],
-    },
-    "03690.HK": {
-        "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
-        "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
-        "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
-        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
-        "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [ 1.0],
-    },
-    "02015.HK": {
-        "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
-        "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
-        "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
-        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
-        "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [1.0],
-    },
-    "01810.HK": {
-        "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
-        "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
-        "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
-        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
-        "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [ 1.0],
-    },
-    "06181.HK": {
-        "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
-        "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
-        "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
-        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
-        "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [0.5,0.6,0.7,0.8,0.9,1.0],
-    },
-    "000625.SZ": {
-        "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
-        "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
-        "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
-        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
-        "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [ 1.0],
-    },
-}
-
-# 运行时激活的配置（由 init_config 设置）
+# 本地激活的配置（由 init_config() 设置）
 BASE_KWARGS = None
 SWEEP_RANGES = None
 
+# 从共享配置导入常量
+WINDOW_BARS = common_config.WINDOW_BARS
+STEP_BARS = common_config.STEP_BARS
+WARMUP = common_config.WARMUP
+COMBINED_SCORE_WEIGHTS = common_config.COMBINED_SCORE_WEIGHTS
+PARAM_LABELS = common_config.PARAM_LABELS
+_constraint_ok = common_config._constraint_ok
+get_scoring_weights = common_config.get_scoring_weights
+
 
 def init_config(ts_code: str):
-    """根据 ts_code 激活对应的 BASE_KWARGS 和 SWEEP_RANGES。"""
+    """根据 ts_code 激活对应的配置。"""
     global BASE_KWARGS, SWEEP_RANGES
-    if ts_code not in _ALL_BASE_KWARGS:
-        raise KeyError(f"未配置 {ts_code} 的 BASE_KWARGS，请在 _ALL_BASE_KWARGS 中添加")
-    if ts_code not in _ALL_SWEEP_RANGES:
-        raise KeyError(f"未配置 {ts_code} 的 SWEEP_RANGES，请在 _ALL_SWEEP_RANGES 中添加")
-    BASE_KWARGS = _ALL_BASE_KWARGS[ts_code]
-    SWEEP_RANGES = _ALL_SWEEP_RANGES[ts_code]
-
-PARAM_LABELS = {
-    "pm_grid_down": "gd",
-    "pm_grid_up": "gu",
-    "pm_reduce_pct": "rp",
-    "pm_add_pct": "ap",
-    "pm_adx_threshold": "adx",
-    "pm_agg_k": "k",
-}
+    common_config.init_config(ts_code)
+    BASE_KWARGS = common_config.BASE_KWARGS
+    SWEEP_RANGES = common_config.SWEEP_RANGES_ACTIVE
 
 # 并行工作进程数（可通过命令行 --workers N 覆盖）
 WORKERS = max(1, multiprocessing.cpu_count() - 1)
-
-# 固定熵权 — key 为 ts_code，通过 get_scoring_weights(ts_code) 获取
-SCORING_WEIGHTS = {
-    "02015.HK": dict(excess=0.387,  robust_sharpe=0.321,  r_cubed=0.293),  # 理想
-    "09992.HK": dict(excess=0.376,  robust_sharpe=0.340,  r_cubed=0.285),  # 泡泡玛特
-    "01810.HK": dict(excess=0.404,  robust_sharpe=0.411,  r_cubed=0.185),  # 小米
-    "06181.HK": dict(excess=0.392,  robust_sharpe=0.323,  r_cubed=0.285),  # 老铺
-    "03690.HK": dict(excess=0.332,  robust_sharpe=0.407,  r_cubed=0.261),    # 美团
-    "000625.SZ": dict(excess=0.3764, robust_sharpe=0.3358, r_cubed=0.2878),    # 长安
-}
-
-
-def get_scoring_weights(ts_code: str) -> dict:
-    """获取指定标的的评分权重配置。"""
-    if ts_code not in SCORING_WEIGHTS:
-        raise KeyError(f"未配置 {ts_code} 的评分权重，请在 SCORING_WEIGHTS 中添加")
-    return SCORING_WEIGHTS[ts_code]
 
 # ═══════════════════════════════════════════════════════════════
 # 工具函数
@@ -617,9 +490,6 @@ def main():
     # ═══════════════════════════════════════════════════════
     # Stage B: 真实滚动窗口回测
     # ═══════════════════════════════════════════════════════
-    WINDOW_BARS = 252
-    STEP_BARS = 10
-    WARMUP = 20
 
     dates = pd.to_datetime(df_base["Date"])
     n = len(df_base)

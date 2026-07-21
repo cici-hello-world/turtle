@@ -26,8 +26,7 @@ from core.scoring import score_pipeline, AbsoluteScorer
 
 # ── 复用 ──
 from strategy.position_management_1.turtle_optimize import (
-    run_one_backtest, _constraint_ok,
-    _plot_sweep_curves, _minmax_norm, PARAM_LABELS,
+    run_one_backtest, _plot_sweep_curves, _minmax_norm,
 )
 from strategy.position_management_1.grid_search_pm import (
     prepare_scenario_dfs, SCENARIO_LABEL_MAP, get_scenario_probs,
@@ -37,199 +36,31 @@ from strategy.position_management_1.simulate_market_scenarios import (
 )
 
 # ═══════════════════════════════════════════════════════════════
-# 配置 — key 为 ts_code，通过 init_config(ts_code) 激活
+# 配置 — 全部从共享配置加载
 # ═══════════════════════════════════════════════════════════════
 
-_ALL_BASE_KWARGS = {
-    "09992.HK": dict(  # 泡泡玛特
-        ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
-        mode="position_management_1", per_shares=200,
-        start_date="20201211", pm_start_date="20210112",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=2, initial_capital=40000, pm_agg_k=1.0,
-        data_source="tushare",
-    ),
-    "03690.HK": dict(  # 美团
-        ts_code="03690.HK", stock_name="美团", market="HK",
-        mode="position_management_1", per_shares=100,
-        pm_start_date="20181023", start_date="20180920",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=2, initial_capital=40000,
-        data_source="tushare",
-    ),
-    "02015.HK": dict(  # 理想
-        ts_code="02015.HK", stock_name="理想", market="HK",
-        mode="position_management_1", per_shares=100,
-        pm_start_date="20210909", start_date="20210812",
-        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=25, initial_capital=40000,
-        data_source="tushare",
-    ),
-    "06181.HK": dict(  # 老铺
-            ts_code="06181.HK",stock_name="老铺",market="HK",
-            mode="position_management_1",per_shares=100,
-            pm_start_date="20240729",start_date="20240628",
-            user_dmi=True,pm_adaptive=True,pm_adaptive_grid=True,
-            pm_dynamic_position=False,ema_fast=0,ema_slow=0,
-            pm_initial_shares=3,initial_capital=40000,
-            data_source="tushare",
-        ),
-    "01810.HK": dict(  # 小米
-        ts_code="01810.HK", stock_name="小米", market="HK",
-        mode="position_management_1",per_shares=200,
-        pm_start_date="20180806", start_date="20180709",
-        user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
-        pm_dynamic_position=False,ema_fast=0,ema_slow=0,
-        pm_initial_shares=4, initial_capital=40000,
-        data_source="tushare",
-    ),
-    "000625.SZ": dict(  # 长安
-        ts_code="000625.SZ", stock_name="长安", market="A",
-        mode="position_management_1",per_shares=100,
-        pm_start_date="20160729", start_date="20160701",
-        user_dmi=True,pm_adaptive=True,pm_adaptive_grid=False,
-        pm_dynamic_position=False,ema_fast=0,ema_slow=0,
-        pm_initial_shares=9, initial_capital=40000,
-        data_source="tushare",
-    ),
-}
+from strategy.position_management_1 import common_config
 
-_ALL_OPTIMAL_PARAMS = {
-    "09992.HK": dict(  # 泡泡玛特
-        pm_grid_down=0.15,pm_grid_up=0.038,pm_reduce_pct=0.79,
-        pm_add_pct=0.50,pm_adx_threshold=21,pm_agg_k=1,
-    ),
-    "03690.HK": dict(  # 美团
-        pm_grid_down=0.105, pm_grid_up=0.039, pm_reduce_pct=0.52,
-        pm_add_pct=0.5, pm_adx_threshold=35, pm_agg_k=1,
-    ),
-    "02015.HK": dict(  # 理想
-        pm_grid_down=0.12, pm_grid_up=0.027, pm_reduce_pct=0.51,
-        pm_add_pct=0.48, pm_adx_threshold=36, pm_agg_k=1,
-    ),
-    "06181.HK": dict(  # 老铺
-        pm_grid_down=0.075, pm_grid_up=0.05, pm_reduce_pct=0.75,
-        pm_add_pct=0.50, pm_adx_threshold=36, pm_agg_k=0.9,
-    ),
-    "01810.HK": dict(  # 小米
-        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.56,
-        pm_add_pct=0.33, pm_adx_threshold=27, pm_agg_k=1,
-    ),
-    "000625.SZ": dict(  # 长安
-        pm_grid_down=0.08, pm_grid_up=0.028, pm_reduce_pct=0.66,
-        pm_add_pct=0.33, pm_adx_threshold=20, pm_agg_k=1,
-    ),
-}
-
-# 运行时激活的配置（由 init_config 设置）
+# 本地激活的配置（由 init_config() 设置）
 BASE_KWARGS = None
 OPTIMAL_PARAMS = None
 
+# 从共享配置导入常量
+WINDOW_BARS = common_config.WINDOW_BARS
+STEP_BARS = common_config.STEP_BARS
+WARMUP = common_config.WARMUP
+SWEEP_DEFS = common_config.SWEEP_DEFS
+PARAM_LABELS = common_config.PARAM_LABELS
+_constraint_ok = common_config._constraint_ok
+get_scorer = common_config.get_scorer
+
 
 def init_config(ts_code: str):
-    """根据 ts_code 激活对应的 BASE_KWARGS 和 OPTIMAL_PARAMS。"""
+    """根据 ts_code 激活对应的配置。"""
     global BASE_KWARGS, OPTIMAL_PARAMS
-    if ts_code not in _ALL_BASE_KWARGS:
-        raise KeyError(f"未配置 {ts_code} 的 BASE_KWARGS，请在 _ALL_BASE_KWARGS 中添加")
-    if ts_code not in _ALL_OPTIMAL_PARAMS:
-        raise KeyError(f"未配置 {ts_code} 的 OPTIMAL_PARAMS，请在 _ALL_OPTIMAL_PARAMS 中添加")
-    BASE_KWARGS = _ALL_BASE_KWARGS[ts_code]
-    OPTIMAL_PARAMS = _ALL_OPTIMAL_PARAMS[ts_code]
-
-# 绝对评分配置 — key 为 ts_code，通过 get_scorer(ts_code) 获取
-SCORING_CONFIG = {
-    "02015.HK": dict(  # 理想
-        weights=dict(excess=0.387,  robust_sharpe=0.321,  r_cubed=0.293),
-        scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=1.89, intercept=-78.73),
-            robust_sharpe=dict(type="linear_quantile", slope=183.67, intercept=25.20),
-            r_cubed=dict(type="linear_quantile", slope=11.04, intercept=6.66),
-        ),
-    ),
-    "09992.HK": dict(  # 泡泡玛特
-        weights=dict(excess=0.376,  robust_sharpe=0.340,  r_cubed=0.285),
-        scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=0.22, intercept=39.17),
-            robust_sharpe=dict(type="linear_quantile", slope=63.83, intercept=11.38),
-            r_cubed=dict(type="linear_quantile", slope=19.52, intercept=8.32),
-        ),
-    ),
-    "03690.HK": dict(  # 美团
-        weights=dict(excess=0.332,  robust_sharpe=0.407,  r_cubed=0.261),
-        scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=0.20, intercept=3.05),
-            robust_sharpe=dict(type="linear_quantile", slope=78.95, intercept=-10.0),
-            r_cubed=dict(type="linear_quantile", slope=42.21, intercept=-5.13),
-        ),
-    ),
-    "01810.HK": dict(  # 小米
-        weights=dict(excess=0.404,  robust_sharpe=0.411,  r_cubed=0.185),
-        scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=0.60, intercept=56.41),
-            robust_sharpe=dict(type="linear_quantile", slope=155.17, intercept=5.0),
-            r_cubed=dict(type="linear_quantile", slope=225.0, intercept=5.0),
-        ),
-    ),
-    "06181.HK": dict(  # 老铺
-        weights=dict(excess=0.392,  robust_sharpe=0.323,  r_cubed=0.285),
-        scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=1.46, intercept=450.43),
-            robust_sharpe=dict(type="linear_quantile", slope=118.42, intercept=-31.71),
-            r_cubed=dict(type="linear_quantile", slope=5.07, intercept=-11.78),
-        ),
-    ),
-    "000625.SZ": dict(  # 长安
-        weights=dict(excess=0.3764, robust_sharpe=0.3358, r_cubed=0.2878),
-        scoring_params=dict(
-            excess=dict(type="linear_quantile", slope=1.0949, intercept=23.8280),
-            robust_sharpe=dict(type="linear_quantile", slope=169.8113, intercept=79.7170),
-            r_cubed=dict(type="linear_quantile", slope=204.5455, intercept=74.5455),
-        ),
-    ),
-}
-
-
-def get_scorer(ts_code: str) -> AbsoluteScorer:
-    """获取指定标的的绝对评分器。"""
-    if ts_code not in SCORING_CONFIG:
-        raise KeyError(f"未配置 {ts_code} 的评分配置，请在 SCORING_CONFIG 中添加")
-    return AbsoluteScorer(SCORING_CONFIG[ts_code])
-
-# 单参数扫描定义（围绕最优值展开）
-SWEEP_DEFS = {
-    "pm_grid_down": {
-        "values": [0.04,0.045, 0.05,0.055, 0.06,0.065,0.07,0.075, 0.08,0.085,0.09,0.095,0.1,0.105,0.11,0.115,0.12,0.13,0.14,0.15],
-        "label": PARAM_LABELS.get("pm_grid_down", "pm_grid_down"),
-    },
-    "pm_grid_up": {
-        "values": [0.025,0.026,0.027,0.028,0.029,0.03,0.031,0.032,0.033,0.034, 0.035,0.036,0.037,0.038,0.039, 0.04,0.041,0.042,0.043,0.044,0.045,0.046,0.047,0.048,0.049, 0.05,0.055, 0.06,0.065,0.07,0.075, 0.08,0.085,0.09,0.095,0.10,0.105,0.11],
-        "label": PARAM_LABELS.get("pm_grid_up", "pm_grid_up"),
-    },
-    "pm_reduce_pct": {
-        "values": [0.31,0.32,0.33,0.34, 0.35,0.36,0.37,0.38,0.39, 0.4,0.45,0.46,0.47,0.48,0.49,0.50,0.51,0.52,0.53,0.54,0.55,0.56,0.57,0.58,0.59, 0.60,0.61,0.62,0.63,0.64,0.65,0.66,0.67,0.68,0.69,0.70,0.71,0.72,0.73,0.74,0.75,0.76,0.77,0.78,0.79,0.80],
-        "label": PARAM_LABELS.get("pm_reduce_pct", "pm_reduce_pct"),
-    },
-    "pm_add_pct": {
-        "values": [0.20,0.21,0.22,0.23,0.24,0.25,0.26,0.27,0.28,0.29,0.30,0.31,0.32,0.33,0.34,0.35,0.36,0.37,0.38,0.39,0.40,0.41,0.42,0.43,0.44,0.45,0.46,0.47,0.48,0.49,0.50,0.51,0.52,0.53,0.54,0.55],
-        "label": PARAM_LABELS.get("pm_add_pct", "pm_add_pct"),
-    },
-    "pm_adx_threshold": {
-        "values": [15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45],
-        "label": PARAM_LABELS.get("pm_adx_threshold", "pm_adx_threshold"),
-    },
-    "pm_agg_k":{
-        "values": [0.60,0.61,0.62,0.63,0.64,0.65,0.66,0.67,0.68,0.69,0.70,0.71,0.72,0.73,0.74,0.75,0.76,0.77,0.78,0.79,0.80,0.81,0.82,0.83,0.84,0.85,0.86,0.87,0.88,0.89,0.90,0.91,0.92,0.93,0.94,0.95,0.96,0.97,0.98,0.99,1.0],
-        "label": PARAM_LABELS.get("pm_agg_k", "pm_agg_k"),
-    }
-}
-
-# 滚动窗口参数
-WINDOW_BARS = 252
-STEP_BARS = 10
-WARMUP = 20
+    common_config.init_config(ts_code)
+    BASE_KWARGS = common_config.BASE_KWARGS
+    OPTIMAL_PARAMS = common_config.OPTIMAL_PARAMS_ACTIVE
 
 # 并行工作进程数
 WORKERS = max(1, multiprocessing.cpu_count() - 1)
@@ -738,6 +569,9 @@ def main():
           f"adx={int(OPTIMAL_PARAMS['pm_adx_threshold'])}")
     print(f"  图表: result/turtle_sweep_all_{ts_code_clean}.png")
     print(f"  Excel: result/turtle_sweep_all_{ts_code_clean}.xlsx")
+
+    # ── 自动更新共享配置中的最优参数 ──
+    common_config.update_optimal_params(BASE_KWARGS["ts_code"], OPTIMAL_PARAMS)
 
 
 if __name__ == "__main__":

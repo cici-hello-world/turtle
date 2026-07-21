@@ -97,32 +97,8 @@ _ALL_BASE_KWARGS = {
 
 }
 
-_ALL_BEST_PARAMS = {
-    "06181.HK": dict(  # 老铺
-        pm_grid_down=0.075, pm_grid_up=0.05, pm_reduce_pct=0.75,
-        pm_add_pct=0.50, pm_adx_threshold=36, pm_agg_k=0.9,
-    ),
-    "02015.HK": dict(  # 理想
-        pm_grid_down=0.12, pm_grid_up=0.027, pm_reduce_pct=0.51,
-        pm_add_pct=0.48, pm_adx_threshold=36, pm_agg_k=1,
-    ),
-    "09992.HK": dict(  # 泡泡玛特
-        pm_grid_down=0.15,pm_grid_up=0.038,pm_reduce_pct=0.79,
-        pm_add_pct=0.50,pm_adx_threshold=21,pm_agg_k=1,
-    ),
-    "03690.HK": dict(  # 美团
-        pm_grid_down=0.105, pm_grid_up=0.039, pm_reduce_pct=0.52,
-        pm_add_pct=0.5, pm_adx_threshold=35, pm_agg_k=1,
-    ),
-    "01810.HK": dict(  # 小米
-        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.56,
-        pm_add_pct=0.33, pm_adx_threshold=27, pm_agg_k=1,
-    ),
-    "000625.SZ": dict(  # 长安
-        pm_grid_down=0.08, pm_grid_up=0.028, pm_reduce_pct=0.66,
-        pm_add_pct=0.33, pm_adx_threshold=20, pm_agg_k=1,
-    ),
-}
+# 最优参数从共享配置获取
+from strategy.position_management_1.common_config import OPTIMAL_PARAMS as _ALL_BEST_PARAMS
 
 # 运行时激活的配置（由 init_config 设置）
 BASE_KWARGS = None
@@ -135,7 +111,7 @@ def init_config(ts_code: str):
     if ts_code not in _ALL_BASE_KWARGS:
         raise KeyError(f"未配置 {ts_code} 的 BASE_KWARGS，请在 _ALL_BASE_KWARGS 中添加")
     if ts_code not in _ALL_BEST_PARAMS:
-        raise KeyError(f"未配置 {ts_code} 的 BEST_PARAMS，请在 _ALL_BEST_PARAMS 中添加")
+        raise KeyError(f"未配置 {ts_code} 的 BEST_PARAMS，请在 common_config.OPTIMAL_PARAMS 中添加")
     BASE_KWARGS = _ALL_BASE_KWARGS[ts_code]
     BEST_PARAMS = _ALL_BEST_PARAMS[ts_code]
 
