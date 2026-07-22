@@ -1288,7 +1288,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             if (close <= reference_price * (1 - eff_grid_down)
               and _dmi_trend_area(row, config, "short", dmi_bl) != "A"
               and _dmi_trend_area(row, config, "long", dmi_bl) != "C"):
-                add_value = capital * add_pct
+                add_value = equity_before * add_pct
                 add_lots = math.floor(add_value / (close * ps))
                 if add_lots <= 0:
                     _snap()

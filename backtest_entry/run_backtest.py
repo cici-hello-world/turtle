@@ -119,7 +119,7 @@ def get_stock_config(ts_code: str, mode: str = "position_management_1") -> dict:
         global BASE_KWARGS, BEST_PARAMS
         common_config.init_config(ts_code)
         BASE_KWARGS = dict(common_config.BASE_KWARGS)  # 复制，避免污染共享配置
-        BASE_KWARGS["pm_start_date"] = "20260521"
+        BASE_KWARGS["pm_start_date"] = "20260629"
         BEST_PARAMS = dict(common_config.OPTIMAL_PARAMS_ACTIVE)
         return {**BASE_KWARGS, **BEST_PARAMS}
     key = (ts_code, mode)
