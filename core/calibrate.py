@@ -42,9 +42,9 @@ from core.indicators import compute_indicators
 from core.scoring import entropy_weights, compute_weights
 
 # 共享配置
+from strategy.position_management_1 import common_config
 from strategy.position_management_1.common_config import (
     DEFAULT_PARAM_SPACE, _constraint_ok, STOCKS,
-    init_config, update_scoring_config, BASE_KWARGS,
 )
 
 
@@ -365,7 +365,7 @@ def main():
     args = parser.parse_args()
 
     # ── 激活配置 ──
-    init_config(args.ts_code)
+    common_config.init_config(args.ts_code)
 
     # ── 加载自定义参数空间 ──
     param_space = None
@@ -375,7 +375,7 @@ def main():
             param_space = {k: tuple(v) for k, v in raw.items()}
 
     # ── 加载数据 ──
-    base_kwargs = copy.deepcopy(BASE_KWARGS)
+    base_kwargs = copy.deepcopy(common_config.BASE_KWARGS)
 
     config0 = BacktestConfig(**base_kwargs)
     df_base = fetch_data(
@@ -393,7 +393,7 @@ def main():
     )
 
     # 买入持有基准收益
-    mask = df_base["Date"] >= BASE_KWARGS["pm_start_date"]
+    mask = df_base["Date"] >= common_config.BASE_KWARGS["pm_start_date"]
     close = df_base.loc[mask, "Close"]
     bm = round((close.iloc[-1] / close.iloc[0] - 1) * 100, 2) if len(close) >= 2 else 0.0
     print(f"  数据: {len(df_base)} 条, 买入持有基准: {bm:+.2f}%")
@@ -414,7 +414,7 @@ def main():
     save_calibration(calibration, output_path)
 
     # ── 自动更新共享评分配置 ──
-    update_scoring_config(args.ts_code, calibration)
+    common_config.update_scoring_config(args.ts_code, calibration)
 
     print(f"\n✅ 校准完成！后续脚本可使用:")
     print(f"   --calibration-file {output_path}")

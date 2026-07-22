@@ -45,60 +45,10 @@ import os
 # ═══════════════════════════════════════════════════════════════
 TRADING_DAYS = 252  # 约1年交易日
 stock_dir = None
-_ALL_BASE_KWARGS = {
-    "06181.HK": dict(  # 老铺
-        ts_code="06181.HK", stock_name="老铺", market="HK",
-        mode="position_management_1", pm_start_date="20260629",
-        ema_slow=0, ema_fast=0, pm_initial_shares=3,
-        initial_capital=40000, user_dmi=True,
-        pm_dynamic_position=False, pm_adaptive_grid=True,
-        per_shares=100, data_source="akshare",
-    ),
-    "02015.HK": dict(  # 理想
-        ts_code="02015.HK", stock_name="理想", market="HK",
-        mode="position_management_1", pm_start_date="20260629",
-        ema_slow=0, ema_fast=0, pm_initial_shares=25,
-        initial_capital=40000, user_dmi=True, pm_adaptive = False,
-        pm_dynamic_position=False, pm_adaptive_grid=False,
-        per_shares=100, data_source="akshare",
-    ),
-    "09992.HK": dict(  # 泡泡玛特
-        ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
-        mode="position_management_1", pm_start_date="20260629",
-        ema_slow=0, ema_fast=0, pm_initial_shares=2,
-        initial_capital=40000, user_dmi=True,
-        pm_dynamic_position=False, pm_adaptive_grid=False,
-        per_shares=200, data_source="akshare",
-    ),
-    "03690.HK": dict(  # 美团
-        ts_code="03690.HK", stock_name="美团", market="HK",
-        mode="position_management_1", pm_start_date="20260629",
-        ema_slow=0, ema_fast=0, pm_initial_shares=2,
-        initial_capital=40000, user_dmi=True,
-        pm_dynamic_position=False, pm_adaptive_grid=False,
-        per_shares=100, data_source="akshare",
-    ),
-    "01810.HK": dict(  # 小米
-        ts_code="01810.HK", stock_name="小米", market="HK",
-        mode="position_management_1", pm_start_date="20260629",
-        ema_slow=0, ema_fast=0, pm_initial_shares=4,
-        initial_capital=40000, user_dmi=True,
-        pm_dynamic_position=False, pm_adaptive_grid=False,
-        per_shares=200, data_source="akshare",
-    ),
-    "000625.SZ": dict(  # 长安
-        ts_code="000625.SZ", stock_name="长安", market="A",
-        mode="position_management_1", pm_start_date="20260629",
-        ema_slow=0, ema_fast=0, pm_initial_shares=8,
-        initial_capital=40000, user_dmi=True,
-        pm_dynamic_position=False, pm_adaptive_grid=False,
-        per_shares=100, data_source="akshare",
-    ),
-
-}
 
 # 最优参数从共享配置获取
-from strategy.position_management_1.common_config import OPTIMAL_PARAMS as _ALL_BEST_PARAMS
+from strategy.position_management_1 import common_config
+
 
 # 运行时激活的配置（由 init_config 设置）
 BASE_KWARGS = None
@@ -108,12 +58,10 @@ BEST_PARAMS = None
 def init_config(ts_code: str):
     """根据 ts_code 激活对应的 BASE_KWARGS 和 BEST_PARAMS。"""
     global BASE_KWARGS, BEST_PARAMS
-    if ts_code not in _ALL_BASE_KWARGS:
-        raise KeyError(f"未配置 {ts_code} 的 BASE_KWARGS，请在 _ALL_BASE_KWARGS 中添加")
-    if ts_code not in _ALL_BEST_PARAMS:
-        raise KeyError(f"未配置 {ts_code} 的 BEST_PARAMS，请在 common_config.OPTIMAL_PARAMS 中添加")
-    BASE_KWARGS = _ALL_BASE_KWARGS[ts_code]
-    BEST_PARAMS = _ALL_BEST_PARAMS[ts_code]
+    common_config.init_config(ts_code)
+    BASE_KWARGS = dict(common_config.BASE_KWARGS)  # 复制，避免污染共享配置
+    BASE_KWARGS["pm_start_date"] = "20260629"
+    BEST_PARAMS = dict(common_config.OPTIMAL_PARAMS_ACTIVE)
 
 
 

@@ -693,12 +693,15 @@ def main():
 
     # ── 最优参数 ──
     best = summary[0]
+    common_config.update_optimal_params(BASE_KWARGS["ts_code"], best)
+
     print(f"\n  🥇 最优参数组合:")
     print(f"     pm_grid_down       = {best['pm_grid_down']:.2f}")
     print(f"     pm_grid_up         = {best['pm_grid_up']:.2f}")
     print(f"     pm_reduce_pct      = {best['pm_reduce_pct']:.2f}")
     print(f"     pm_add_pct         = {best['pm_add_pct']:.2f}")
     print(f"     pm_adx_threshold   = {int(best['pm_adx_threshold'])}")
+    print(f"     pm_agg_k           = {best['pm_agg_k']:.1f}")
     print(f"     ──────────────────")
     print(f"     综合得分:  {best['combined']:.2f}")
     print(f"     滚动中位数: {best['rolling_median']:.2f}  P10={best['rolling_p10']:.2f}  "

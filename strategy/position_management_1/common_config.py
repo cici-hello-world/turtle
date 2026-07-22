@@ -79,7 +79,7 @@ def _constraint_ok(params: dict) -> bool:
     gu = params.get("pm_grid_up", 0)
     rp = params.get("pm_reduce_pct", 0)
     ap = params.get("pm_add_pct", 0)
-    return gd > gu and rp > ap
+    return gd > gu
 
 # ═══════════════════════════════════════════════════════════════
 # 股票基础配置（回测用）
@@ -131,24 +131,24 @@ STOCKS = {
         pm_initial_shares=4, initial_capital=40000,
         data_source="tushare",
     ),
-    "00700.HK": dict(  # 腾讯
-        ts_code="00700.HK", stock_name="腾讯", market="HK",
-        mode="position_management_1", per_shares=100,
-        start_date="20040616", pm_start_date="20040816",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=0, initial_capital=60000,
-        data_source="tushare",
-    ),
-    "000625.SZ": dict(  # 长安
-        ts_code="000625.SZ", stock_name="长安", market="A",
-        mode="position_management_1", per_shares=100,
-        start_date="20160701", pm_start_date="20160729",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=9, initial_capital=40000,
-        data_source="tushare",
-    ),
+    # "00700.HK": dict(  # 腾讯
+    #     ts_code="00700.HK", stock_name="腾讯", market="HK",
+    #     mode="position_management_1", per_shares=100,
+    #     start_date="20160701", pm_start_date="20160801",
+    #     user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+    #     pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+    #     pm_initial_shares=0, initial_capital=60000,
+    #     data_source="tushare",
+    # ),
+    # "000625.SZ": dict(  # 长安
+    #     ts_code="000625.SZ", stock_name="长安", market="A",
+    #     mode="position_management_1", per_shares=100,
+    #     start_date="20160701", pm_start_date="20160729",
+    #     user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+    #     pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+    #     pm_initial_shares=9, initial_capital=40000,
+    #     data_source="tushare",
+    # ),
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -160,7 +160,7 @@ SWEEP_RANGES = {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
         "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
-        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+        "pm_add_pct": [0.30,0.40,0.50, 0.60, 0.70],
         "pm_adx_threshold": [25, 30, 35],
         "pm_agg_k": [1.0],
     },
@@ -168,7 +168,7 @@ SWEEP_RANGES = {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
         "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
-        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+        "pm_add_pct": [0.30,0.40,0.50, 0.60, 0.70],
         "pm_adx_threshold": [25, 30, 35],
         "pm_agg_k": [1.0],
     },
@@ -176,7 +176,7 @@ SWEEP_RANGES = {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
         "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
-        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+        "pm_add_pct": [0.30,0.40,0.50, 0.60, 0.70],
         "pm_adx_threshold": [25, 30, 35],
         "pm_agg_k": [1.0],
     },
@@ -184,7 +184,7 @@ SWEEP_RANGES = {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
         "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
-        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+        "pm_add_pct": [0.30,0.40,0.50, 0.60, 0.70],
         "pm_adx_threshold": [25, 30, 35],
         "pm_agg_k": [1.0],
     },
@@ -192,7 +192,7 @@ SWEEP_RANGES = {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
         "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
-        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+        "pm_add_pct": [0.30,0.40,0.50, 0.60, 0.70],
         "pm_adx_threshold": [25, 30, 35],
         "pm_agg_k": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
     },
@@ -200,7 +200,7 @@ SWEEP_RANGES = {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
         "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
-        "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+        "pm_add_pct": [0.30,0.40,0.50, 0.60, 0.70],
         "pm_adx_threshold": [25, 30, 35],
         "pm_agg_k": [1.0],
     },
@@ -234,10 +234,11 @@ SWEEP_DEFS = {
         "label": PARAM_LABELS["pm_reduce_pct"],
     },
     "pm_add_pct": {
-        "values": [0.20, 0.21, 0.22, 0.23, 0.24, 0.25, 0.26, 0.27, 0.28,
-                   0.29, 0.30, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.37,
-                   0.38, 0.39, 0.40, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46,
-                   0.47, 0.48, 0.49, 0.50, 0.51, 0.52, 0.53, 0.54, 0.55],
+        "values": [0.30, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.37, 0.38, 0.39,
+                   0.40, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.48, 0.49,
+                   0.50, 0.51, 0.52, 0.53, 0.54, 0.55, 0.56, 0.57, 0.58, 0.59,
+                   0.60, 0.61, 0.62, 0.63, 0.64, 0.65, 0.66, 0.67, 0.68, 0.69,
+                   0.70, 0.71, 0.72, 0.73, 0.74, 0.75],
         "label": PARAM_LABELS["pm_add_pct"],
     },
     "pm_adx_threshold": {
@@ -369,14 +370,19 @@ def _save_state(state: dict):
 
 _state = _load_state()
 
-# 用持久化状态覆盖默认值
+# 策略参数键名（用于过滤污染数据）
+_PARAM_KEYS = {"pm_grid_down", "pm_grid_up", "pm_reduce_pct",
+               "pm_add_pct", "pm_adx_threshold", "pm_agg_k"}
+
+# 用持久化状态覆盖默认值（过滤只保留策略参数键）
 OPTIMAL_PARAMS = copy.deepcopy(_OPTIMAL_PARAMS_DEFAULT)
 if "optimal_params" in _state:
     for ts_code, params in _state["optimal_params"].items():
+        clean = {k: v for k, v in params.items() if k in _PARAM_KEYS}
         if ts_code in OPTIMAL_PARAMS:
-            OPTIMAL_PARAMS[ts_code].update(params)
+            OPTIMAL_PARAMS[ts_code].update(clean)
         else:
-            OPTIMAL_PARAMS[ts_code] = params
+            OPTIMAL_PARAMS[ts_code] = clean
 
 SCORING_CONFIG = copy.deepcopy(_SCORING_CONFIG_DEFAULT)
 if "scoring_config" in _state:
@@ -447,11 +453,25 @@ def update_scoring_config(ts_code: str, calibration: dict):
 
 
 def update_optimal_params(ts_code: str, params: dict):
-    """更新最优参数（内存 + 持久化到 config_state.json）。"""
-    OPTIMAL_PARAMS[ts_code] = dict(params)
-    if OPTIMAL_PARAMS_ACTIVE is not None and OPTIMAL_PARAMS_ACTIVE.get("ts_code") is None:
-        # OPTIMAL_PARAMS_ACTIVE 是当前激活标的的参数 dict，直接 update
-        pass  # 仅更新持久化数据，下一轮 init_config 会自动加载
+    """更新最优参数（内存 + 持久化到 config_state.json）。
+
+    仅保留 6 个策略参数键，自动过滤评分结果等无关字段。
+    """
+    _PARAM_KEYS = {"pm_grid_down", "pm_grid_up", "pm_reduce_pct",
+                   "pm_add_pct", "pm_adx_threshold", "pm_agg_k"}
+    filtered = {k: v for k, v in params.items() if k in _PARAM_KEYS}
+    if len(filtered) < len(_PARAM_KEYS):
+        missing = _PARAM_KEYS - set(filtered.keys())
+        print(f"  ⚠️ update_optimal_params: 缺少参数键 {missing}，将用旧值补全")
+        old = OPTIMAL_PARAMS.get(ts_code, {})
+        for k in missing:
+            if k in old:
+                filtered[k] = old[k]
+
+    OPTIMAL_PARAMS[ts_code] = filtered
+    if OPTIMAL_PARAMS_ACTIVE is not None and isinstance(OPTIMAL_PARAMS_ACTIVE, dict):
+        OPTIMAL_PARAMS_ACTIVE.clear()
+        OPTIMAL_PARAMS_ACTIVE.update(filtered)
 
     # 持久化
     _state["optimal_params"] = {

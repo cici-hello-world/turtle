@@ -77,82 +77,6 @@ def run(config: BacktestConfig):
 
 # ==================== 配置 — key 为 (ts_code, mode) ====================
 STOCK_CONFIGS = {
-    ("03690.HK", "position_management_1"): dict(
-        ts_code="03690.HK", stock_name="美团", market="HK",
-        mode="position_management_1",
-        pm_start_date="20260629", start_date="20180920",
-        user_dmi=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_grid_down=0.105, pm_grid_up=0.039, pm_reduce_pct=0.52,
-        pm_add_pct=0.5, pm_adx_threshold=35, pm_agg_k=1,
-        pm_initial_shares=2, initial_capital=40000,
-        data_source="akshare",
-    ),
-    ("09992.HK", "position_management_1"): dict(
-        ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
-        mode="position_management_1", per_shares=200,
-        pm_start_date="20260629", start_date="20201211",
-        user_dmi=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_grid_down=0.15,pm_grid_up=0.038,pm_reduce_pct=0.79,
-        pm_add_pct=0.50,pm_adx_threshold=21,pm_agg_k=1,
-        pm_initial_shares=2, initial_capital=40000,
-        data_source="tushare",
-    ),
-    ("02015.HK", "position_management_1"): dict(
-        ts_code="02015.HK", stock_name="理想", market="HK",
-        mode="position_management_1",
-        user_dmi=True, ema_fast=0, ema_slow=0,
-        pm_start_date="20260629", start_date="20210812",
-        pm_grid_down=0.12, pm_grid_up=0.027, pm_reduce_pct=0.51,
-        pm_add_pct=0.48, pm_adx_threshold=36, pm_agg_k=1,
-        pm_initial_shares=25, initial_capital=40000,
-        pm_dynamic_position=False, pm_adaptive_grid=False,
-        pm_adaptive = False, data_source="tushare",
-    ),
-    ("01810.HK", "position_management_1"): dict(
-        ts_code="01810.HK", stock_name="小米", market="HK",
-        mode="position_management_1",per_shares=200,
-        user_dmi=True, ema_fast=0, ema_slow=0,
-        pm_start_date="20260629", start_date="20180709",
-        pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.56,
-        pm_add_pct=0.33, pm_adx_threshold=27, pm_agg_k=1,
-        pm_initial_shares=4, initial_capital=40000,
-        pm_dynamic_position=False, pm_adaptive_grid=False,
-        data_source="akshare",
-    ),
-    ("06181.HK", "position_management_1"): dict(
-        ts_code="06181.HK", stock_name="老铺", market="HK",
-        mode="position_management_1",
-        pm_start_date="20260629", start_date="20240628",
-        user_dmi=True, pm_adaptive_grid=True,
-        pm_grid_down=0.075, pm_grid_up=0.05, pm_reduce_pct=0.75,
-        pm_add_pct=0.50, pm_adx_threshold=36, pm_agg_k=0.9,
-        ema_slow=0, ema_fast=0, pm_initial_shares=3,
-        initial_capital=40000, pm_dynamic_position=False,
-        data_source="tushare",
-    ),
-    ("00700.HK","position_management_1"): dict(  # 腾讯
-        ts_code="00700.HK", stock_name="腾讯", market="HK",
-        mode="position_management_1",
-        pm_start_date="20251001",start_date="20160701",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=0, initial_capital=60000,
-        data_source="tushare",
-    ),
-    ("000625.SZ","position_management_1"): dict(  # 长安
-        ts_code="000625.SZ", stock_name="长安", market="A",
-        mode="position_management_1",
-        pm_start_date="20251001", start_date="20160701",
-        user_dmi=True, pm_adaptive_grid=False,
-        pm_grid_down=0.08, pm_grid_up=0.028, pm_reduce_pct=0.66,
-        pm_add_pct=0.33, pm_adx_threshold=20, pm_agg_k=1,
-        ema_slow=0, ema_fast=0, pm_initial_shares=8,
-        initial_capital=40000,pm_dynamic_position=False,
-        per_shares=100, data_source="akshare",
-    ),
-
     # long_more 模式示例
     ("09992.HK", "long_more"): dict(
         ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
@@ -185,10 +109,19 @@ STOCK_CONFIGS = {
         data_source="akshare",
     ),
 }
-
+from strategy.position_management_1 import common_config
+BASE_KWARGS = None
+BEST_PARAMS = None
 
 def get_stock_config(ts_code: str, mode: str = "position_management_1") -> dict:
     """获取指定标的和模式对应的回测配置。"""
+    if mode == "position_management_1":
+        global BASE_KWARGS, BEST_PARAMS
+        common_config.init_config(ts_code)
+        BASE_KWARGS = dict(common_config.BASE_KWARGS)  # 复制，避免污染共享配置
+        BASE_KWARGS["pm_start_date"] = "20260521"
+        BEST_PARAMS = dict(common_config.OPTIMAL_PARAMS_ACTIVE)
+        return {**BASE_KWARGS, **BEST_PARAMS}
     key = (ts_code, mode)
     if key not in STOCK_CONFIGS:
         raise KeyError(f"未配置 {ts_code} mode={mode} 的回测参数，请在 STOCK_CONFIGS 中添加")
