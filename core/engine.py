@@ -1395,7 +1395,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                             "Shares": reduce_lots, "Cost_¥": trade_cost,
                             "PnL_¥": net_proceeds, "PnL_%": 0.0,
                             "Capital_After": capital,
-                            "Reason": f"网格卖出 +{int(eff_grid_up*100)}%（权益{int(eff_reduce*100)}%）",
+                            "Reason": f"网格卖出 +{round(eff_grid_up*100,2)}%（权益{round(eff_reduce*100,2)}%）",
                             "Amount": net_proceeds, "Position_After": current_lots,
                             "Equity_After": equity, "Reference_Price": reference_price,
                             "+DI": row["+DI"],
