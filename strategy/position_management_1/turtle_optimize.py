@@ -174,7 +174,7 @@ def _minmax_norm(raw: list[float]) -> list[float]:
 def _plot_sweep_curves(sweeps: dict, out_dir: str, filename: str = "turtle_sweeps.png",
                         title: str = "单参数扫描 — Score & 分项指标曲线",
                         base_params: dict | None = None):
-    """绘制每个参数的值-vs-指标曲线（score + R³ + 稳健夏普 + 超额收益，共用归一化 y 轴）"""
+    """绘制每个参数的值-vs-指标曲线（score + R³ + 稳健夏普 + 超额收益，不做归一化）"""
     param_names = [k for k in sweeps.keys() if not k.startswith("_")]
     n = len(param_names)
     if n == 0:
@@ -206,22 +206,20 @@ def _plot_sweep_curves(sweeps: dict, out_dir: str, filename: str = "turtle_sweep
 
         for key, disp_name, color, ls, marker in lines_cfg:
             raw = [r[key] for r in results_sorted]
-            y = _minmax_norm(raw)
-            ax.plot(x, y, color=color, linestyle=ls, marker=marker,
+            ax.plot(x, raw, color=color, linestyle=ls, marker=marker,
                     linewidth=1.5, markersize=5, label=disp_name)
 
-        # 标注 score 最高点（score 已 min-max 归一化到 0-100）
+        # 标注 score 最高点
         best = max(results_sorted, key=lambda r: r["score"])
-        scores_norm = _minmax_norm([r["score"] for r in results_sorted])
         best_idx = next(j for j, r in enumerate(results_sorted) if r is best)
         ax.annotate(f"{best['value']:.3f}",
-                    xy=(best["value"], scores_norm[best_idx]),
+                    xy=(best["value"], best["score"]),
                     xytext=(0, -12), textcoords="offset points",
                     fontsize=8, color="darkred", ha="center",
                     arrowprops=dict(arrowstyle="->", color="darkred", lw=0.8))
 
         ax.set_xlabel(label, fontsize=11)
-        ax.set_ylabel("归一化得分 (0–100)", fontsize=11)
+        ax.set_ylabel("滚动窗口指标均值", fontsize=11)
         ax.set_title(f"{label}", fontsize=12, fontweight="bold")
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8, loc="lower right")

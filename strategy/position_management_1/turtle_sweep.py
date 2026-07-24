@@ -26,7 +26,7 @@ from core.scoring import score_pipeline, AbsoluteScorer
 
 # ── 复用 ──
 from strategy.position_management_1.turtle_optimize import (
-    run_one_backtest, _plot_sweep_curves, _minmax_norm,
+    run_one_backtest, _plot_sweep_curves,
 )
 from strategy.position_management_1.grid_search_pm import (
     prepare_scenario_dfs, SCENARIO_LABEL_MAP, get_scenario_probs,
@@ -277,20 +277,29 @@ def _aggregate_sweep(all_results: list[dict], sweep_param: str) -> list[dict]:
                     sim_probs.append(prob)
 
         sim_weighted = (sum(sim_scores) / sum(sim_probs)
-                        if sim_scores and sum(sim_probs) > 0 else 50.0)
+                        if sim_scores and sum(sim_probs) > 0 else 0.0)
 
         combined = 0.5 * rolling_median + 0.3 * sim_weighted + 0.2 * full_score
 
         full_orig = next((r for r in group if r["_window"] == "full"), group[0])
+
+        # 滚动窗口各原始指标均值（用于绘图）
+        rolling_excess_vals = [r.get("excess", r.get("超额收益 (%)", 0) or 0) if r.get("总收益率 (%)", 0)<=0 or r.get("excess", r.get("超额收益 (%)", 0) or 0)>=0  else None
+                               for r in group if r["_window"].startswith("rolling_")]
+        rolling_excess_vals = [x for x in rolling_excess_vals if x is not None]
+        rolling_sharpe_vals = [r.get("robust_sharpe", r.get("稳健夏普比率", 0) or 0) if r.get("总收益率 (%)", 0)<=0 or r.get("excess", r.get("超额收益 (%)", 0) or 0)>=0  else None
+                               for r in group if r["_window"].startswith("rolling_")]
+        rolling_sharpe_vals = [x for x in rolling_sharpe_vals if x is not None] if r.get("总收益率 (%)", 0)<=0 or r.get("excess", r.get("超额收益 (%)", 0) or 0)>=0  else None
+        rolling_rcubed_vals = [r.get("r_cubed", r.get("R立方", 0) or 0)
+                               for r in group if r["_window"].startswith("rolling_")]
+        rolling_rcubed_vals = [x for x in rolling_rcubed_vals if x is not None]
+
         summary.append({
             "value": val,
             "score": round(combined, 2),
-            "excess": round(full_orig.get("excess",
-                             full_orig.get("超额收益 (%)", 0) or 0), 2),
-            "robust_sharpe": round(full_orig.get("robust_sharpe",
-                                   full_orig.get("稳健夏普比率", 0) or 0), 2),
-            "r_cubed": round(full_orig.get("r_cubed",
-                             full_orig.get("R立方", 0) or 0), 2),
+            "excess": round(float(np.mean(rolling_excess_vals)), 2) if rolling_excess_vals else 0.0,
+            "robust_sharpe": round(float(np.mean(rolling_sharpe_vals)), 2) if rolling_sharpe_vals else 0.0,
+            "r_cubed": round(float(np.mean(rolling_rcubed_vals)), 2) if rolling_rcubed_vals else 0.0,
             "CAGR": round(full_orig.get("CAGR (%)", 0), 2),
             "MaxDD": round(full_orig.get("最大回撤 (%)", 0), 2),
             "trades": full_orig.get("总交易", 0),

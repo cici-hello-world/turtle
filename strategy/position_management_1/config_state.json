@@ -209,8 +209,8 @@
     "09992.HK": {
       "pm_grid_down": 0.12,
       "pm_grid_up": 0.05,
-      "pm_reduce_pct": 0.69,
-      "pm_add_pct": 0.39,
+      "pm_reduce_pct": 0.76,
+      "pm_add_pct": 0.34,
       "pm_adx_threshold": 21,
       "pm_agg_k": 1.0
     },
