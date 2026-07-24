@@ -38,37 +38,37 @@
     },
     "09992.HK": {
       "weights": {
-        "excess": 0.3916,
-        "robust_sharpe": 0.3056,
-        "r_cubed": 0.3028
+        "excess": 0.3743,
+        "robust_sharpe": 0.3336,
+        "r_cubed": 0.2921
       },
       "scoring_params": {
         "excess": {
           "type": "linear_quantile",
-          "low_val": -155.4555,
-          "high_val": 260.751,
+          "low_val": -135.341,
+          "high_val": -91.568,
           "low_score": 5.0,
           "high_score": 95.0,
-          "slope": 0.21623881414634322,
-          "intercept": 38.61551297252686
+          "slope": 2.0560619560002737,
+          "intercept": 283.269481187033
         },
         "robust_sharpe": {
           "type": "linear_quantile",
-          "low_val": -0.1305,
-          "high_val": 1.3105,
+          "low_val": -0.34,
+          "high_val": 0.4105,
           "low_score": 5.0,
           "high_score": 95.0,
-          "slope": 62.456627342123525,
-          "intercept": 13.15058986814712
+          "slope": 119.92005329780147,
+          "intercept": 45.772818121252506
         },
         "r_cubed": {
           "type": "linear_quantile",
-          "low_val": -0.211,
-          "high_val": 4.6305,
+          "low_val": -0.57,
+          "high_val": 2.032,
           "low_score": 5.0,
           "high_score": 95.0,
-          "slope": 18.58928018176185,
-          "intercept": 8.92233811835175
+          "slope": 34.588777863182166,
+          "intercept": 24.715603382013835
         }
       }
     },
@@ -207,11 +207,11 @@
   },
   "optimal_params": {
     "09992.HK": {
-      "pm_grid_down": 0.12,
-      "pm_grid_up": 0.05,
-      "pm_reduce_pct": 0.76,
-      "pm_add_pct": 0.34,
-      "pm_adx_threshold": 21,
+      "pm_grid_down": 0.14,
+      "pm_grid_up": 0.11,
+      "pm_reduce_pct": 0.79,
+      "pm_add_pct": 0.32,
+      "pm_adx_threshold": 35,
       "pm_agg_k": 1.0
     },
     "03690.HK": {
@@ -225,16 +225,16 @@
     "02015.HK": {
       "pm_grid_down": 0.045,
       "pm_grid_up": 0.036,
-      "pm_reduce_pct": 0.35,
+      "pm_reduce_pct": 0.36,
       "pm_add_pct": 0.26,
       "pm_adx_threshold": 36,
       "pm_agg_k": 1.0
     },
     "06181.HK": {
       "pm_grid_down": 0.07,
-      "pm_grid_up": 0.05,
+      "pm_grid_up": 0.043,
       "pm_reduce_pct": 0.75,
-      "pm_add_pct": 0.5,
+      "pm_add_pct": 0.53,
       "pm_adx_threshold": 35,
       "pm_agg_k": 1.0
     },

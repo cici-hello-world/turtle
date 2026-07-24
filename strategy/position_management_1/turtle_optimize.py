@@ -180,11 +180,14 @@ def _plot_sweep_curves(sweeps: dict, out_dir: str, filename: str = "turtle_sweep
     if n == 0:
         return
 
-    lines_cfg = [
+    # 左轴曲线：score / 稳健夏普 / 超额收益；右轴：R³
+    lines_left = [
         ("score",         "Score (综合)",       "steelblue",  "-",  "o"),
-        ("r_cubed",       "R³",                 "darkorange", "--", "s"),
         ("robust_sharpe", "稳健夏普",            "seagreen",   "-.", "D"),
         ("excess",        "超额收益",            "firebrick",  ":",  "^"),
+    ]
+    lines_right = [
+        ("r_cubed",       "R³",                 "darkorange", "--", "s"),
     ]
 
     cols = min(3, n)
@@ -204,7 +207,17 @@ def _plot_sweep_curves(sweeps: dict, out_dir: str, filename: str = "turtle_sweep
         results_sorted = sorted(results, key=lambda r: r["value"])
         x = [r["value"] for r in results_sorted]
 
-        for key, disp_name, color, ls, marker in lines_cfg:
+        # 右轴：R³
+        ax_r = ax.twinx()
+        for key, disp_name, color, ls, marker in lines_right:
+            raw = [r[key] for r in results_sorted]
+            ax_r.plot(x, raw, color=color, linestyle=ls, marker=marker,
+                      linewidth=1.5, markersize=5, label=disp_name)
+        ax_r.set_ylabel("R³", fontsize=11, color="darkorange")
+        ax_r.tick_params(axis="y", labelcolor="darkorange")
+
+        # 左轴：score / 稳健夏普 / 超额收益
+        for key, disp_name, color, ls, marker in lines_left:
             raw = [r[key] for r in results_sorted]
             ax.plot(x, raw, color=color, linestyle=ls, marker=marker,
                     linewidth=1.5, markersize=5, label=disp_name)
@@ -222,7 +235,11 @@ def _plot_sweep_curves(sweeps: dict, out_dir: str, filename: str = "turtle_sweep
         ax.set_ylabel("滚动窗口指标均值", fontsize=11)
         ax.set_title(f"{label}", fontsize=12, fontweight="bold")
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=8, loc="lower right")
+
+        # 合并左右轴图例
+        lines_l, labels_l = ax.get_legend_handles_labels()
+        lines_r, labels_r = ax_r.get_legend_handles_labels()
+        ax.legend(lines_l + lines_r, labels_l + labels_r, fontsize=8, loc="lower right")
 
         # 标注固定参数（除当前扫描参数外）
         if base_params:
