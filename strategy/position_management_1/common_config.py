@@ -38,13 +38,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 # ═══════════════════════════════════════════════════════════════
 
 WINDOW_BARS = 252
-STEP_BARS = 5
+STEP_BARS = 10
 WARMUP = 20
 
 COMBINED_SCORE_WEIGHTS = {
-    "rolling_median": 0.7,
-    "sim_weighted": 0.2,
-    "full_score": 0.1,
+    "rolling_median": 0.5,
+    "sim_weighted": 0.3,
+    "full_score": 0.2,
 }
 
 PARAM_LABELS = {
