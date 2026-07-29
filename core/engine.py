@@ -1280,7 +1280,8 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 equity_dates.extend(eq_dates)
         # ---- Donchian 未触发或失败 → 尝试网格交易 ----
         if not donchian_done:
-            # 空仓时市价已涨超一个卖出网格→追认当前价格，避免牛市踏空
+            # 空仓时市价已涨超一个卖出网格→追认当前价格，避免牛市踏空，
+            # config.pm_adaptive为false时不重置参考价，减少交易次数，且没有存在价格回不到之前的网格的情况
             if config.pm_adaptive and current_lots == 0 and close > reference_price * (1 + eff_grid_up):
                 reference_price = close
             # 非单边上涨/下跌时网格交易买入
@@ -1358,6 +1359,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                     "Position_After": current_lots,
                     "Equity_After": equity,
                     "Reference_Price": reference_price,
+                    "more_info":[],
                     "+DI": row["+DI"],
                     "-DI": row["-DI"],
                     "ADX14": row["ADX14"],
@@ -1400,6 +1402,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                             "Reason": f"网格卖出 +{round(eff_grid_up*100,2)}%（权益{round(eff_reduce*100,2)}%）",
                             "Amount": net_proceeds, "Position_After": current_lots,
                             "Equity_After": equity, "Reference_Price": reference_price,
+                            "more_info": [],
                             "+DI": row["+DI"],
                             "-DI": row["-DI"],
                             "ADX14": row["ADX14"],
