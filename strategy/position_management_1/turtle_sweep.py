@@ -50,6 +50,7 @@ WINDOW_BARS = common_config.WINDOW_BARS
 STEP_BARS = common_config.STEP_BARS
 WARMUP = common_config.WARMUP
 SWEEP_DEFS = common_config.SWEEP_DEFS
+COMBINED_SCORE_WEIGHTS = common_config.COMBINED_SCORE_WEIGHTS
 PARAM_LABELS = common_config.PARAM_LABELS
 _constraint_ok = common_config._constraint_ok
 get_scorer = common_config.get_scorer
@@ -227,14 +228,18 @@ def _debug_cross_check(all_results: list[dict], sweep_param: str,
             sim_weighted += r["score"] * prob
             sim_probs_total += prob
     sim_weighted = sim_weighted / sim_probs_total if sim_probs_total > 0 else 0
-    combined = 0.5 * rolling_median + 0.3 * sim_weighted + 0.2 * full_score
+    combined = (COMBINED_SCORE_WEIGHTS["rolling_median"] * rolling_median +
+                COMBINED_SCORE_WEIGHTS["sim_weighted"] * sim_weighted +
+                COMBINED_SCORE_WEIGHTS["full_score"] * full_score)
 
     print(f"  🔍 [DEBUG cross-check] sweep={sweep_param} "
           f"params=({','.join(f'{PARAM_LABELS.get(p,p)}={optimal_params.get(p)}' for p in SWEEP_DEFS)})")
     print(f"     full_score={full_score:.2f}  "
           f"rolling_median={rolling_median:.2f} (n={len(rolling_rs)})  "
           f"sim_weighted={sim_weighted:.2f} (n={len(sim_rs)})")
-    print(f"     combined = 0.5×{rolling_median:.2f} + 0.3×{sim_weighted:.2f} + 0.2×{full_score:.2f} = {combined:.2f}")
+    print(f"     combined = {COMBINED_SCORE_WEIGHTS['rolling_median']}×{rolling_median:.2f} "
+          f"+ {COMBINED_SCORE_WEIGHTS['sim_weighted']}×{sim_weighted:.2f} "
+          f"+ {COMBINED_SCORE_WEIGHTS['full_score']}×{full_score:.2f} = {combined:.2f}")
     if full_r:
         print(f"     raw: excess={full_r.get('excess',0):.2f}  "
               f"robust_sharpe={full_r.get('robust_sharpe',0):.2f}  "
@@ -279,7 +284,9 @@ def _aggregate_sweep(all_results: list[dict], sweep_param: str) -> list[dict]:
         sim_weighted = (sum(sim_scores) / sum(sim_probs)
                         if sim_scores and sum(sim_probs) > 0 else 0.0)
 
-        combined = 0.5 * rolling_median + 0.3 * sim_weighted + 0.2 * full_score
+        combined = (COMBINED_SCORE_WEIGHTS["rolling_median"] * rolling_median +
+                    COMBINED_SCORE_WEIGHTS["sim_weighted"] * sim_weighted +
+                    COMBINED_SCORE_WEIGHTS["full_score"] * full_score)
 
         full_orig = next((r for r in group if r["_window"] == "full"), group[0])
 

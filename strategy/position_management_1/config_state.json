@@ -2,19 +2,19 @@
   "scoring_config": {
     "02015.HK": {
       "weights": {
-        "excess": 0.3797,
-        "robust_sharpe": 0.2704,
-        "r_cubed": 0.3499
+        "excess": 0.3825,
+        "robust_sharpe": 0.2674,
+        "r_cubed": 0.3501
       },
       "scoring_params": {
         "excess": {
           "type": "linear_quantile",
-          "low_val": 43.5105,
-          "high_val": 91.3055,
+          "low_val": 44.313,
+          "high_val": 92.3425,
           "low_score": 5.0,
           "high_score": 95.0,
-          "slope": 1.8830421592216762,
-          "intercept": -76.93210586881474
+          "slope": 1.8738483640262755,
+          "intercept": -78.03584255509635
         },
         "robust_sharpe": {
           "type": "linear_quantile",
@@ -28,11 +28,11 @@
         "r_cubed": {
           "type": "linear_quantile",
           "low_val": -0.17,
-          "high_val": 7.2235,
+          "high_val": 6.7635,
           "low_score": 5.0,
           "high_score": 95.0,
-          "slope": 12.172854534388314,
-          "intercept": 7.069385270846014
+          "slope": 12.980457200548065,
+          "intercept": 7.206677724093171
         }
       }
     },
@@ -146,37 +146,37 @@
     },
     "06181.HK": {
       "weights": {
-        "excess": 0.3436,
-        "robust_sharpe": 0.2945,
-        "r_cubed": 0.3619
+        "excess": 0.4229,
+        "robust_sharpe": 0.31,
+        "r_cubed": 0.2671
       },
       "scoring_params": {
         "excess": {
           "type": "linear_quantile",
-          "low_val": -353.38,
-          "high_val": -282.2295,
+          "low_val": -257.4225,
+          "high_val": -181.0555,
           "low_score": 5.0,
           "high_score": 95.0,
-          "slope": 1.2649243504964824,
-          "intercept": 451.99896697844696
+          "slope": 1.1785195175926773,
+          "intercept": 308.377440517501
         },
         "robust_sharpe": {
           "type": "linear_quantile",
-          "low_val": 0.28,
-          "high_val": 0.9605,
+          "low_val": 0.27,
+          "high_val": 0.951,
           "low_score": 5.0,
           "high_score": 95.0,
-          "slope": 132.2556943423953,
-          "intercept": -32.031594415870686
+          "slope": 132.15859030837007,
+          "intercept": -30.68281938325992
         },
         "r_cubed": {
           "type": "linear_quantile",
-          "low_val": 2.938,
-          "high_val": 13.8535,
+          "low_val": 2.4985,
+          "high_val": 12.8445,
           "low_score": 5.0,
           "high_score": 95.0,
-          "slope": 8.245155970867115,
-          "intercept": -19.224268242407586
+          "slope": 8.699014111734003,
+          "intercept": -16.73448675816741
         }
       }
     },
@@ -223,19 +223,19 @@
       "pm_agg_k": 1.0
     },
     "02015.HK": {
-      "pm_grid_down": 0.045,
-      "pm_grid_up": 0.036,
-      "pm_reduce_pct": 0.46,
-      "pm_add_pct": 0.26,
-      "pm_adx_threshold": 36,
+      "pm_grid_down": 0.04,
+      "pm_grid_up": 0.03,
+      "pm_reduce_pct": 0.59,
+      "pm_add_pct": 0.39,
+      "pm_adx_threshold": 35,
       "pm_agg_k": 1.0
     },
     "06181.HK": {
       "pm_grid_down": 0.07,
-      "pm_grid_up": 0.055,
+      "pm_grid_up": 0.044,
       "pm_reduce_pct": 0.75,
       "pm_add_pct": 0.5,
-      "pm_adx_threshold": 38,
+      "pm_adx_threshold": 30,
       "pm_agg_k": 1.0
     },
     "01810.HK": {

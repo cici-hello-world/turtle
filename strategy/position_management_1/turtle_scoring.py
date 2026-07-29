@@ -63,7 +63,6 @@ WINDOW_BARS = common_config.WINDOW_BARS
 STEP_BARS = common_config.STEP_BARS
 WARMUP = common_config.WARMUP
 COMBINED_SCORE_WEIGHTS = common_config.COMBINED_SCORE_WEIGHTS
-PARAM_LABELS = common_config.PARAM_LABELS
 _constraint_ok = common_config._constraint_ok
 get_scoring_weights = common_config.get_scoring_weights
 
@@ -647,8 +646,10 @@ def main():
         else:
             sim_weighted = 50.0
 
-        # 综合 = 0.5 × 滚动中位数 + 0.3 × 模拟加权 + 0.2 × 全量
-        combined = 0.5 * rolling_median + 0.3 * sim_weighted + 0.2 * full_score
+        # 综合 = W_rolling × 滚动中位数 + W_sim × 模拟加权 + W_full × 全量
+        combined = (COMBINED_SCORE_WEIGHTS["rolling_median"] * rolling_median +
+                    COMBINED_SCORE_WEIGHTS["sim_weighted"] * sim_weighted +
+                    COMBINED_SCORE_WEIGHTS["full_score"] * full_score)
 
         # 全量窗口原始指标
         full_orig = next((r for r in group if r["_window"] == "full"), group[0])

@@ -42,8 +42,8 @@ STEP_BARS = 5
 WARMUP = 20
 
 COMBINED_SCORE_WEIGHTS = {
-    "rolling_median": 0.6,
-    "sim_weighted": 0.3,
+    "rolling_median": 0.7,
+    "sim_weighted": 0.2,
     "full_score": 0.1,
 }
 

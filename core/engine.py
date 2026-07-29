@@ -1167,6 +1167,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 donchian_done = True
                 add_lots = trades[0].get("Shares",0)
                 total_cost = trades[0].get("Cost_¥",0)
+                more_info = trades[0].get("More Info",[])
                 capital -= total_cost
                 current_lots += add_lots
                 equity = capital + current_lots * close * ps
@@ -1189,6 +1190,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                     "Position_After": current_lots,
                     "Equity_After": equity,
                     "Reference_Price": reference_price,
+                    "more_info": more_info,
                     "+DI":row["+DI"],
                     "-DI":row["-DI"],
                     "ADX14":row["ADX14"],
