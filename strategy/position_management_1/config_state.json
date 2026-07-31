@@ -241,9 +241,9 @@
     "01810.HK": {
       "pm_grid_down": 0.07,
       "pm_grid_up": 0.05,
-      "pm_reduce_pct": 0.71,
-      "pm_add_pct": 0.54,
-      "pm_adx_threshold": 27,
+      "pm_reduce_pct": 0.70,
+      "pm_add_pct": 0.45,
+      "pm_adx_threshold": 25,
       "pm_agg_k": 1.0
     },
     "000625.SZ": {
