@@ -545,7 +545,7 @@ def _run_long_only(df: pd.DataFrame, config) -> tuple[list[dict], list[float], l
 
 # ==================== 加仓做多（金字塔） ====================
 
-def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[list[dict], list[float], list]:
+def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False,current_lots :int =0) -> tuple[list[dict], list[float], list]:
     label = config.channel_type
     ps = config.per_shares
 
@@ -578,7 +578,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
         close = float(row["Close"])
 
         def _snap():
-            equity_curve.append(capital + current_shares * close * ps)
+            equity_curve.append(capital + (current_shares + current_lots) * close * ps)
             equity_dates.append(current_date)
 
         if pos is None:
@@ -616,7 +616,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
                 capital -= cost
 
         else:
-            div_income, capital = _collect_dividend(row, current_shares, ps, capital)
+            div_income, capital = _collect_dividend(row, (current_shares+current_lots), ps, capital)
             cumulative_div += div_income
 
             exit_price, exit_reason = _check_long_exit(row, stop_loss_price, config)
@@ -679,7 +679,7 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False) -> tuple[lis
     if pos == "long":
         last_price = df.iloc[-1]["Close"]
         last_date = df.iloc[-1]["Date"]
-        sell_proceeds = last_price * current_shares * ps
+        sell_proceeds = last_price * current_shares * ps - _pm_trade_cost(last_price * current_shares * ps, config.market, "sell")
         pnl = sell_proceeds - total_cost + cumulative_div
         capital += sell_proceeds
         last_trade_pnl = pnl  # System 1 输家突破过滤：记录本笔盈亏
@@ -1162,13 +1162,19 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             tmp_config = copy.deepcopy(config)
             tmp_config.initial_capital = capital
             tmp_config.don_start_date = current_date
-            trades,eq,eq_dates =_run_long_with_pyramid(df_donchian, tmp_config, True)
+            trades,eq,eq_dates =_run_long_with_pyramid(df_donchian, tmp_config, True,current_lots)
             if trades:
                 donchian_done = True
                 add_lots = trades[0].get("Shares",0)
                 total_cost = trades[0].get("Cost_¥",0)
                 more_info = trades[0].get("More Info",[])
-                capital -= total_cost
+                # capital -= total_cost
+                capital = trades[0].get("Capital_After")
+                exit_price = trades[0].get("Exit Price")
+                # 平仓交易金额
+                trade_amount = exit_price * add_lots * ps - _pm_trade_cost(exit_price * add_lots * ps,config.market,"sell")
+                # donchian加仓后的现金=donchian平仓后的现金-平仓交易金额
+                capital -= trade_amount
                 current_lots += add_lots
                 equity = capital + current_lots * close * ps
                 reference_price = close
@@ -1201,40 +1207,39 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                     "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
                 })
                 donchian_exit_date = trades[0].get("Exit Date")
-                exit_price = trades[0].get("Exit Price")
-                trade_amount = trades[0].get("Capital_After") - capital
                 capital = trades[0].get("Capital_After")
                 reason = trades[0].get("Reason")
-                current_lots -= add_lots
-                equity = capital + current_lots * exit_price * ps
-                reference_price = exit_price
-                pm_trades.append({
-                    "Date": donchian_exit_date,
-                    "Entry Date": donchian_exit_date,
-                    "Exit Date": donchian_exit_date,
-                    "Type": "减仓",
-                    "Price": exit_price,
-                    "Shares": add_lots,
-                    "Entry Price": exit_price,
-                    "Exit Price": exit_price,
-                    "Cost_¥": 0,
-                    "PnL_¥": 0,
-                    "PnL_%": 0.0,
-                    "Capital_After": capital,
-                    "Reason": reason,
-                    "Amount": trade_amount,
-                    "Position_After": current_lots,
-                    "Equity_After": equity,
-                    "Reference_Price": reference_price,
-                    "+DI": row["+DI"],
-                    "-DI": row["-DI"],
-                    "ADX14": row["ADX14"],
-                    "ADXR": row["ADXR"],
-                    "ADX_UP": row["ADX_UP"],
-                    "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
-                    "ADX_DOWN": row["ADX_DOWN"],
-                    "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
-                })
+                if reason !="强制平仓": #强制平仓不记录减仓
+                    current_lots -= add_lots
+                    equity = capital + current_lots * exit_price * ps
+                    reference_price = exit_price
+                    pm_trades.append({
+                        "Date": donchian_exit_date,
+                        "Entry Date": donchian_exit_date,
+                        "Exit Date": donchian_exit_date,
+                        "Type": "减仓",
+                        "Price": exit_price,
+                        "Shares": add_lots,
+                        "Entry Price": exit_price,
+                        "Exit Price": exit_price,
+                        "Cost_¥": 0,
+                        "PnL_¥": 0,
+                        "PnL_%": 0.0,
+                        "Capital_After": capital,
+                        "Reason": reason,
+                        "Amount": trade_amount,
+                        "Position_After": current_lots,
+                        "Equity_After": equity,
+                        "Reference_Price": reference_price,
+                        "+DI": row["+DI"],
+                        "-DI": row["-DI"],
+                        "ADX14": row["ADX14"],
+                        "ADXR": row["ADXR"],
+                        "ADX_UP": row["ADX_UP"],
+                        "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
+                        "ADX_DOWN": row["ADX_DOWN"],
+                        "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
+                    })
                 # 趋势反转出场 → 趋势已破，清空剩余网格仓位
                 # 止损出场 → 可能是假突破，保留网格仓位继续运作
                 is_trend_reversal = "Trend Reversal" in reason
@@ -1280,8 +1285,11 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 equity_dates.extend(eq_dates)
         # ---- Donchian 未触发或失败 → 尝试网格交易 ----
         if not donchian_done:
+            if current_lots > 0:
+                div_income, capital = _collect_dividend(row, current_lots, ps, capital)
             # 空仓时市价已涨超一个卖出网格→追认当前价格，避免牛市踏空，
             # config.pm_adaptive为false时不重置参考价，减少交易次数，且没有存在价格回不到之前的网格的情况
+            # 09992.HK存在价格回不到之前的网格的情况
             if config.pm_adaptive and current_lots == 0 and close > reference_price * (1 + eff_grid_up):
                 reference_price = close
             # 非单边上涨/下跌时网格交易买入
@@ -1412,6 +1420,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                             "ADX_DOWN": row["ADX_DOWN"],
                             "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
                         })
+
                 # 每日收盘权益快照（不论是否发生交易）
                 _snap()
 

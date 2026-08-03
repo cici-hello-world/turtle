@@ -73,7 +73,8 @@ def main():
         if config.ts_code in failed:
             print(f"  ⏭️ {config.stock_name} ({config.ts_code}) 缓存失败，跳过")
             continue
-
+        if config.ts_code in ["01810.HK","06181.HK"]:
+            config.pm_start_date = "20260801"
         signal = extract_signal(config)
         if signal:
             signals.append(signal)
