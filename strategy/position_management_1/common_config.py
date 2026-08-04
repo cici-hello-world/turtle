@@ -66,7 +66,7 @@ DEFAULT_PARAM_SPACE = {
     "pm_reduce_pct":     (0.30, 0.80),
     "pm_add_pct":        (0.20, 0.60),
     "pm_adx_threshold":  (15, 50),
-    "pm_agg_k":          (0.5, 1.0),
+    "pm_agg_k":          (1.0, 1.0),
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -90,15 +90,15 @@ STOCKS = {
         ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
         mode="position_management_1", per_shares=200,
         start_date="20201211", pm_start_date="20210112",
-        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=False,
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=2, initial_capital=40000,
+        pm_initial_shares=2, initial_capital=80000,
         data_source="tushare", atr_period=14,
     ),
     "03690.HK": dict(  # 美团
         ts_code="03690.HK", stock_name="美团", market="HK",
         mode="position_management_1", per_shares=100,
-        start_date="20181023", pm_start_date="20180920",
+        start_date="20180920", pm_start_date="20181023",
         user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=2, initial_capital=40000,

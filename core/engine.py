@@ -1289,7 +1289,6 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 div_income, capital = _collect_dividend(row, current_lots, ps, capital)
             # 空仓时市价已涨超一个卖出网格→追认当前价格，避免牛市踏空，
             # config.pm_adaptive为false时不重置参考价，减少交易次数，且没有存在价格回不到之前的网格的情况
-            # 09992.HK存在价格回不到之前的网格的情况
             if config.pm_adaptive and current_lots == 0 and close > reference_price * (1 + eff_grid_up):
                 reference_price = close
             # 非单边上涨/下跌时网格交易买入
