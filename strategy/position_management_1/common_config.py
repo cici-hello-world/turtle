@@ -38,13 +38,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 # ═══════════════════════════════════════════════════════════════
 
 WINDOW_BARS = 252
-STEP_BARS = 10
+STEP_BARS = 5
 WARMUP = 20
 
 COMBINED_SCORE_WEIGHTS = {
-    "rolling_median": 0.5,
-    "sim_weighted": 0.3,
-    "full_score": 0.2,
+    "rolling_median": 0.65,
+    "sim_weighted": 0.00,
+    "full_score": 0.35,
 }
 
 PARAM_LABELS = {
@@ -66,7 +66,7 @@ DEFAULT_PARAM_SPACE = {
     "pm_reduce_pct":     (0.30, 0.80),
     "pm_add_pct":        (0.20, 0.60),
     "pm_adx_threshold":  (15, 50),
-    "pm_agg_k":          (1.0, 1.0),
+    "pm_agg_k":          (0.5, 1.0),
 }
 
 # ═══════════════════════════════════════════════════════════════

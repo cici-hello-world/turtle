@@ -526,48 +526,52 @@ def main():
     # ═══════════════════════════════════════════════════════
     # Stage C: 8种场景模拟回测
     # ═══════════════════════════════════════════════════════
-    print(f"\n{'='*60}")
-    print(f"[{_now()}] 🅲 Stage C: 8种场景模拟回测 "
-          f"({len(param_combos)}组 × 8场景, {WORKERS} workers)")
-    print(f"{'='*60}")
+    if COMBINED_SCORE_WEIGHTS.get("sim_weighted", 0) == 0:
+        print(f"\n⏭️  跳过 Stage C: 模拟场景回测 "
+              f"(sim_weighted=0，模拟数据不参与综合评分)")
+    else:
+        print(f"\n{'='*60}")
+        print(f"[{_now()}] 🅲 Stage C: 8种场景模拟回测 "
+              f"({len(param_combos)}组 × 8场景, {WORKERS} workers)")
+        print(f"{'='*60}")
 
-    t0 = time.time()
+        t0 = time.time()
 
-    # 获取最后价格和日期
-    try:
-        last_price, last_date = sim_get_last_price()
-    except Exception:
-        from core.cache import load as cache_load
-        cached = cache_load(config0.ts_code, config0.market)
-        last_price = float(cached["Close"].iloc[-1])
-        last_date = cached["Date"].iloc[-1]
-    sim_start = (last_date + timedelta(days=1)).strftime("%Y%m%d")
-    print(f"  模拟起始: {sim_start}, 最新价: {last_price:.2f}")
+        # 获取最后价格和日期
+        try:
+            last_price, last_date = sim_get_last_price()
+        except Exception:
+            from core.cache import load as cache_load
+            cached = cache_load(config0.ts_code, config0.market)
+            last_price = float(cached["Close"].iloc[-1])
+            last_date = cached["Date"].iloc[-1]
+        sim_start = (last_date + timedelta(days=1)).strftime("%Y%m%d")
+        print(f"  模拟起始: {sim_start}, 最新价: {last_price:.2f}")
 
-    # 生成场景数据
-    scenario_dfs, scenario_benchmarks = prepare_scenario_dfs(
-        last_price, last_date, config0, df_base)
+        # 生成场景数据
+        scenario_dfs, scenario_benchmarks = prepare_scenario_dfs(
+            last_price, last_date, config0, df_base)
 
-    sim_count = 0
-    batches = _split_batches(param_combos, WORKERS)
-    with ProcessPoolExecutor(max_workers=WORKERS) as executor:
-        futures = {
-            executor.submit(_worker_stage_c,
-                            (batch, BASE_KWARGS, scenario_dfs,
-                             scenario_benchmarks, sim_start)): idx
-            for idx, batch in enumerate(batches)
-        }
-        for future in as_completed(futures):
-            batch_results = future.result()
-            all_results.extend(batch_results)
-            sim_count += len(batch_results)
-            done = sum(1 for f in futures if f.done())
-            elapsed = time.time() - t0
-            print(f"    [{done}/{len(batches)} batches] {elapsed:.0f}s  "
-                  f"累计: {len(all_results)}")
+        sim_count = 0
+        batches = _split_batches(param_combos, WORKERS)
+        with ProcessPoolExecutor(max_workers=WORKERS) as executor:
+            futures = {
+                executor.submit(_worker_stage_c,
+                                (batch, BASE_KWARGS, scenario_dfs,
+                                 scenario_benchmarks, sim_start)): idx
+                for idx, batch in enumerate(batches)
+            }
+            for future in as_completed(futures):
+                batch_results = future.result()
+                all_results.extend(batch_results)
+                sim_count += len(batch_results)
+                done = sum(1 for f in futures if f.done())
+                elapsed = time.time() - t0
+                print(f"    [{done}/{len(batches)} batches] {elapsed:.0f}s  "
+                      f"累计: {len(all_results)}")
 
-    print(f"  模拟完成: +{sim_count} 条  (总累计 {len(all_results)})  "
-          f"耗时 {(time.time()-t0)/60:.1f}min")
+        print(f"  模拟完成: +{sim_count} 条  (总累计 {len(all_results)})  "
+              f"耗时 {(time.time()-t0)/60:.1f}min")
 
     # ═══════════════════════════════════════════════════════
     # 评分

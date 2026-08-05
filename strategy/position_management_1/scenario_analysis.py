@@ -322,35 +322,31 @@ def estimate_probabilities(scores: dict, ts_code: str = "",
                            features: dict = None) -> dict:
     """基于当前行情走势 + 宏观环境实时推测未来6个月各情景概率。
 
-    不使用历史模式匹配。信号来自 features（近期的趋势、波动、回撤），
-    宏观来自 STOCK_MACRO 的个股定性背景。
+    使用 match_scenarios() 的定量特征匹配得分（composite），而非启发式乘数。
+    composite 得分综合了方向、斜率、波动率、总变化幅度、涨日比五维匹配。
     """
     macro = _get_macro(ts_code)
     sorted_by_match = sorted(scores.items(), key=lambda x: x[1]["composite"], reverse=True)
 
-    # ── 从实时信号计算各情景得分 ──
-    if features:
-        raw_scores = {}
-        for name, params in SCENARIOS.items():
-            raw_scores[name] = _scenario_signal_score(name, params, features)
+    # ── 使用 match_scenarios 的 composite 得分 ──
+    raw_scores = {}
+    for name in SCENARIOS:
+        raw_scores[name] = scores.get(name, {}).get("composite", 0.0)
 
-        # ── 宏观调整：根据个股背景微调 ±20% ──
-        macro_bias = {
-            "缓慢阴跌": 1.05, "震荡向下": 1.05, "横盘震荡": 1.0,
-            "V形反转": 0.95, "震荡向上": 1.0, "单边下跌": 0.95,
-            "倒V反转": 0.95, "单边上涨": 0.95,
-        }
-        for name in raw_scores:
-            raw_scores[name] *= macro_bias.get(name, 1.0)
+    # ── 宏观调整：根据个股基本面微调 ±10% ──
+    macro_bias = {
+        "缓慢阴跌": 1.10, "震荡向下": 1.10, "横盘震荡": 1.0,
+        "V形反转": 0.90, "震荡向上": 1.0, "单边下跌": 0.90,
+        "倒V反转": 0.90, "单边上涨": 0.90,
+    }
+    for name in raw_scores:
+        raw_scores[name] *= macro_bias.get(name, 1.0)
 
-        # ── softmax 转概率 ──
-        temp = 0.3
-        exp_scores = {k: np.exp(v / temp) for k, v in raw_scores.items()}
-        total = sum(exp_scores.values())
-        probs = {k: round(v / total, 4) for k, v in exp_scores.items()}
-    else:
-        # 无 features 时退化为等权
-        probs = {k: round(1.0 / len(SCENARIOS), 4) for k in SCENARIOS}
+    # ── softmax 转概率 ──
+    temp = 0.6
+    exp_scores = {k: np.exp(v / temp) for k, v in raw_scores.items()}
+    total = sum(exp_scores.values())
+    probs = {k: round(v / total, 4) for k, v in exp_scores.items()}
 
     probs = dict(sorted(probs.items(), key=lambda x: x[1], reverse=True))
 
