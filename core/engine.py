@@ -170,8 +170,8 @@ _STOCK_GRID_CONSTANTS = {
         vol_base=0.040, vol_adx_slope=1200.0, vol_div=0.020,
     ),
     "02015.HK": dict(  # 理想 — A区-1.65% D区+0.68% C区-0.33%，DMI区制预测力弱
-        zone_score={"A": 0.45, "D": 0.50, "C": 0.25},
-        vol_base=0.048, vol_adx_slope=1200.0, vol_div=0.029,
+        zone_score={"A": 0.30, "D": 0.45, "C": 0.20},
+        vol_base=0.055, vol_adx_slope=800.0, vol_div=0.035,
     ),
 }
 
@@ -179,6 +179,17 @@ _STOCK_GRID_CONSTANTS = {
 def _get_grid_constants(ts_code: str) -> dict:
     """获取个股自适应网格常量，未配置的股票返回默认值（09992.HK）。"""
     return _STOCK_GRID_CONSTANTS.get(ts_code)
+
+
+def _get_best_zone(ts_code: str) -> str:
+    """获取个股 zone_score 中权重最高的区域，用于 DMI 阻塞判断。
+
+    未配置的股票默认返回 "D"（无趋势震荡区）。
+    """
+    gc = _get_grid_constants(ts_code)
+    if gc and gc.get("zone_score"):
+        return max(gc["zone_score"], key=gc["zone_score"].get)
+    return "D"
 
 
 def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[float, float, float]:
@@ -1107,6 +1118,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
     dyn_p4 = config.pm_dyn_pos_4
     take_profit = config.pm_take_profit_ratio # 止盈回本倍数
     dmi_bl = df.attrs.get("dmi_baseline")      # 个股 DMI 基线（自动适配，无需配置）
+    best_zone = _get_best_zone(config.ts_code)  # 个股最优 DMI 区域（zone_score 权重最高者）
 
     pm_trades = []
     capital = config.initial_capital
@@ -1296,7 +1308,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             # 实证：short A/B(下跌确认,20d+0.32%/-0.23%)拦截买入；
             # long C(趋势酝酿,20d仅+1.09%/胜46.6%)也拦截，等趋势确认后再入场
             if (close <= reference_price * (1 - eff_grid_down)
-              and _dmi_trend_area(row, config, "short", dmi_bl) != "A"
+              and _dmi_trend_area(row, config, "short", dmi_bl) != best_zone
               and _dmi_trend_area(row, config, "long", dmi_bl) != "C"):
                 add_value = equity_before * add_pct
                 add_lots = math.floor(add_value / (close * ps))
@@ -1361,7 +1373,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                     "PnL_¥": -total_cost,
                     "PnL_%": 0.0,
                     "Capital_After": capital,
-                    "Reason": f"网格买入 -{int(eff_grid_down * 100)}%（权益{int(add_pct * 100)}%）",
+                    "Reason": f"网格买入 -{round(eff_grid_down * 100,2)}%（权益{round(add_pct * 100,2)}%）",
                     "Amount": -total_cost,
                     "Position_After": current_lots,
                     "Equity_After": equity,
@@ -1383,7 +1395,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 # 失效模式③修复：B区20日+6.98%优于A区+4.58%，卖出拦截从仅A区扩展到A+B
                 if (close >= reference_price * (1 + eff_grid_up)
                         and current_lots > 0
-                        and _dmi_trend_area(row, config, "long", dmi_bl) != "A"):
+                        and _dmi_trend_area(row, config, "long", dmi_bl) != best_zone):
                     reduce_value = equity_before * eff_reduce
                     reduce_lots = math.ceil(reduce_value / (close * ps))
                     reduce_lots = min(reduce_lots, current_lots)
