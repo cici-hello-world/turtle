@@ -37,7 +37,7 @@ from data_cache.update_cache import main as update_cache_main
 from strategy.position_management_1.common_config import STOCKS, OPTIMAL_PARAMS
 
 STOCK_CONFIGS = [
-    BacktestConfig(**{**STOCKS[ts_code], **OPTIMAL_PARAMS.get(ts_code, {}), "pm_start_date": "20260629"})
+    BacktestConfig(**{**STOCKS[ts_code], **OPTIMAL_PARAMS.get(ts_code, {}), "pm_start_date": "20260801"})
     for ts_code in STOCKS
 ]
 
@@ -73,8 +73,6 @@ def main():
         if config.ts_code in failed:
             print(f"  ⏭️ {config.stock_name} ({config.ts_code}) 缓存失败，跳过")
             continue
-        if config.ts_code in ["01810.HK","06181.HK","09992.HK","03690.HK"]:
-            config.pm_start_date = "20260801"
         signal = extract_signal(config)
         if signal:
             signals.append(signal)
