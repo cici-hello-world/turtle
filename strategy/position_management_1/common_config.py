@@ -66,7 +66,7 @@ DEFAULT_PARAM_SPACE = {
     "pm_reduce_pct":     (0.30, 0.80),
     "pm_add_pct":        (0.20, 0.60),
     "pm_adx_threshold":  (15, 50),
-    "pm_agg_k":          (0.5, 1.0),
+    "pm_agg_k":          (1.0, 1.0),
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -108,9 +108,9 @@ STOCKS = {
         ts_code="02015.HK", stock_name="理想", market="HK",
         mode="position_management_1", per_shares=100,
         start_date="20210812", pm_start_date="20210909",
-        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=True,
+        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=5, initial_capital=40000,
+        pm_initial_shares=0, initial_capital=200000,
         data_source="tushare",
     ),
     "06181.HK": dict(  # 老铺
@@ -178,7 +178,7 @@ SWEEP_RANGES = {
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
         "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
         "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        "pm_agg_k": [1.0],
     },
     "01810.HK": {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
