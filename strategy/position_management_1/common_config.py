@@ -38,7 +38,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 # ═══════════════════════════════════════════════════════════════
 
 WINDOW_BARS = 252
-STEP_BARS = 5
+STEP_BARS = 5 #理想和老铺是5，其他10
 WARMUP = 20
 
 COMBINED_SCORE_WEIGHTS = {
@@ -140,15 +140,15 @@ STOCKS = {
     #     pm_initial_shares=0, initial_capital=60000,
     #     data_source="tushare",
     # ),
-    # "000625.SZ": dict(  # 长安
-    #     ts_code="000625.SZ", stock_name="长安", market="A",
-    #     mode="position_management_1", per_shares=100,
-    #     start_date="20160701", pm_start_date="20160729",
-    #     user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-    #     pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-    #     pm_initial_shares=9, initial_capital=40000,
-    #     data_source="tushare",
-    # ),
+    "000625.SZ": dict(  # 长安
+        ts_code="000625.SZ", stock_name="长安", market="A",
+        mode="position_management_1", per_shares=100,
+        start_date="20160701", pm_start_date="20160729",
+        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=False,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=9, initial_capital=40000,
+        data_source="tushare",
+    ),
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -371,7 +371,9 @@ _state = _load_state()
 
 # 策略参数键名（用于过滤污染数据）
 _PARAM_KEYS = {"pm_grid_down", "pm_grid_up", "pm_reduce_pct",
-               "pm_add_pct", "pm_adx_threshold", "pm_agg_k"}
+               "pm_add_pct", "pm_adx_threshold", "pm_agg_k",
+               "pm_rsi_enabled", "pm_rsi_period",
+               "pm_rsi_oversold", "pm_rsi_overbought"}
 
 # 用持久化状态覆盖默认值（过滤只保留策略参数键）
 OPTIMAL_PARAMS = copy.deepcopy(_OPTIMAL_PARAMS_DEFAULT)

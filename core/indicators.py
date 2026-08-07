@@ -136,6 +136,16 @@ def compute_indicators(
         denom = np.where(np.abs(adx_5d_ago) > 0.1, np.abs(adx_5d_ago), 1.0)
         df["ADX_SLOPE_5"] = (adx14 - adx_5d_ago) / denom
 
+        # ---- RSI (Wilder 平滑，与 ATR 一致) ----
+        close_arr = df["Close"].values.astype(float)
+        delta = np.diff(close_arr, prepend=close_arr[0])
+        gain = np.where(delta > 0, delta, 0.0)
+        loss = np.where(delta < 0, -delta, 0.0)
+        avg_gain = _wilder_smooth(gain, 14)
+        avg_loss = _wilder_smooth(loss, 14)
+        rs = np.where(avg_loss > 0, avg_gain / avg_loss, 100.0)
+        df["RSI14"] = 100.0 - 100.0 / (1.0 + rs)
+
     # ── 个股 DMI 基线：自动计算，供 _dmi_trend_area 自适应分区 ──
     df.attrs["dmi_baseline"] = _compute_dmi_baseline(df)
 

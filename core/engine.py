@@ -153,26 +153,42 @@ def _dmi_trend_area(row, config, direction: str = "long",
 # vol_div: vol_adj 归一化除数（≈该股票 vol 的 std）
 # 默认值来自 09992.HK 泡泡玛特，其他股票按需覆盖
 _STOCK_GRID_CONSTANTS = {
-    "09992.HK": dict(  # 泡泡玛特
+    "09992.HK": dict(  # 泡泡玛特 — 高波动，RSI带放宽
         zone_score={"A": 1.0, "D": 0.65, "C": 0.30},
         vol_base=0.05, vol_adx_slope=600.0, vol_div=0.08,
+        rsi_oversold=25, rsi_overbought=75,
     ),
     "03690.HK": dict(  # 美团 — D区+1.34% C区-0.32%，D远弱于泡泡玛特
         zone_score={"A": 1.0, "D": 0.40, "C": 0.25},
         vol_base=0.047, vol_adx_slope=1200.0, vol_div=0.028,
+        rsi_oversold=30, rsi_overbought=70,
     ),
-    "06181.HK": dict(  # 老铺 — A区+29% D区+7.7% C区-0.97%，A极强但D也不弱
+    "06181.HK": dict(  # 老铺 — A区+29% D区+7.7% C区-0.97%，极端波动
         zone_score={"A": 1.0, "D": 0.45, "C": 0.25},
         vol_base=0.061, vol_adx_slope=1200.0, vol_div=0.025,
+        rsi_oversold=20, rsi_overbought=80,
     ),
     "01810.HK": dict(  # 小米 — A区+3.4% D区+1.8% C区-0.82%，与泡泡玛特格局接近
         zone_score={"A": 1.0, "D": 0.65, "C": 0.25},
         vol_base=0.040, vol_adx_slope=1200.0, vol_div=0.020,
+        rsi_oversold=30, rsi_overbought=70,
     ),
     "02015.HK": dict(  # 理想 — A区-1.65% D区+0.68% C区-0.33%，DMI区制预测力弱
         zone_score={"A": 0.30, "D": 0.45, "C": 0.20},
         vol_base=0.055, vol_adx_slope=800.0, vol_div=0.035,
+        rsi_oversold=25, rsi_overbought=75,
     ),
+    "000625.SZ": dict(  # 长安汽车 — A区+1.62% D区-1.29% C区≈0%, DMI区分度一般、低波动
+        zone_score={"A": 1.0, "D": 0.30, "C": 0.25},
+        vol_base=0.0337, vol_adx_slope=1200, vol_div=0.0177,
+        rsi_oversold=30, rsi_overbought=65,
+    ),
+    "00700.HK": dict(  # 腾讯 — A区+1.8% D区+1.0% C区+0.2%, DMI质量高、三区全正
+        zone_score={"A": 1.0, "D": 0.65, "C": 0.25},
+        vol_base=0.0277, vol_adx_slope=1200, vol_div=0.0098,
+        rsi_oversold=30, rsi_overbought=70,
+    ),
+
 }
 
 
@@ -268,6 +284,20 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
     # strength 在 zone_blend 基础上 ±0.1 微调
     blend = zone_blend + (strength - 0.5) * 0.15
     blend = min(max(blend + vol_adj, 0.3), 0.7)
+
+    # ── RSI 超买超卖微调（叠加于 DMI 之上，±0.05）──
+    if config.pm_rsi_enabled:
+        rsi = row.get("RSI14", 50.0)
+        if not pd.isna(rsi):
+            rsi_os = gc.get("rsi_oversold", config.pm_rsi_oversold)
+            rsi_ob = gc.get("rsi_overbought", config.pm_rsi_overbought)
+            if rsi < rsi_os:
+                rsi_adj = 0.05   # 超卖 → 更积极买入
+            elif rsi > rsi_ob:
+                rsi_adj = -0.05  # 超买 → 更保守
+            else:
+                rsi_adj = 0.0
+            blend = min(max(blend + rsi_adj, 0.3), 0.7)
 
     # ── 不对称插值 ──
     # gd: blend↑ → gd↓（从 gd 插值到 gd*k，强趋势敢买回调）
@@ -1307,7 +1337,18 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             # 失效模式④修复：short C区(下跌酝酿)最危险(20日+0.52%)，不应允许买入
             # 实证：short A/B(下跌确认,20d+0.32%/-0.23%)拦截买入；
             # long C(趋势酝酿,20d仅+1.09%/胜46.6%)也拦截，等趋势确认后再入场
-            if (close <= reference_price * (1 - eff_grid_down)
+            # RSI 叠加：超买阻止买入（不追高），超卖放宽触发价（积极接）
+            buy_trigger = close <= reference_price * (1 - eff_grid_down)
+            # RSI 超卖 → 临时放宽 20% 触发价（更容易触发买入）
+            rsi_buy = row.get("RSI14", 50.0)
+            rsi_buy_os = config.pm_rsi_oversold
+            rsi_buy_ob = config.pm_rsi_overbought
+            if config.pm_rsi_enabled and not pd.isna(rsi_buy):
+                if rsi_buy > rsi_buy_ob:
+                    buy_trigger = False  # 超买 → 不追高
+                elif rsi_buy < rsi_buy_os:
+                    buy_trigger = close <= reference_price * (1 - eff_grid_down * 0.7)  # 超卖 → 积极接
+            if (buy_trigger
               and _dmi_trend_area(row, config, "short", dmi_bl) != best_zone
               and _dmi_trend_area(row, config, "long", dmi_bl) != "C"):
                 add_value = equity_before * add_pct
@@ -1393,10 +1434,21 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             else:
                 # ---- 非单边上涨趋势 → 网格交易 ----
                 # 失效模式③修复：B区20日+6.98%优于A区+4.58%，卖出拦截从仅A区扩展到A+B
-                if (close >= reference_price * (1 + eff_grid_up)
-                        and current_lots > 0
-                        and _dmi_trend_area(row, config, "long", dmi_bl) != best_zone):
+                # RSI 叠加：超卖阻止卖出（不割肉），超买加大减仓比例
+                sell_trigger = (close >= reference_price * (1 + eff_grid_up)
+                                and current_lots > 0
+                                and _dmi_trend_area(row, config, "long", dmi_bl) != best_zone)
+                rsi_sell = row.get("RSI14", 50.0)
+                rsi_sell_os = config.pm_rsi_oversold
+                rsi_sell_ob = config.pm_rsi_overbought
+                if config.pm_rsi_enabled and not pd.isna(rsi_sell) and sell_trigger:
+                    if rsi_sell < rsi_sell_os:
+                        sell_trigger = False  # 超卖 → 不在底部割肉
+                if sell_trigger:
                     reduce_value = equity_before * eff_reduce
+                    # RSI 超买 → 加大减仓比例 50%
+                    if config.pm_rsi_enabled and not pd.isna(rsi_sell) and rsi_sell > rsi_sell_ob:
+                        reduce_value = equity_before * min(eff_reduce * 1.5, 0.95)
                     reduce_lots = math.ceil(reduce_value / (close * ps))
                     reduce_lots = min(reduce_lots, current_lots)
                     if  equity_before > initial_equity * take_profit:

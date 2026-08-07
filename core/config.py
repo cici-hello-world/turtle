@@ -84,6 +84,12 @@ class BacktestConfig:
     pm_adx_threshold: float = 25.0   # ADX 震荡/趋势分界线
     pm_agg_k: float = 0.6            # 震荡市激进倍数: gda=gd×k, gua=gu×k, rpa=rp+(1-k)×0.5
 
+    # ========== RSI 超买超卖过滤器（叠加于 DMI 之上） ==========
+    pm_rsi_enabled: bool = True      # 是否启用 RSI 过滤器
+    pm_rsi_period: int = 14          # RSI 计算周期
+    pm_rsi_oversold: float = 30.0    # 超卖阈值（RSI低于此值 → 更积极买入、禁止卖出）
+    pm_rsi_overbought: float = 70.0  # 超买阈值（RSI高于此值 → 禁止买入、更积极卖出）
+
     # ========== 止盈与回本参数 ==========
     pm_take_profit_ratio: float = 100  # 权益超过初始×该倍数后：仓位归零时停止交易，有仓位时全仓清仓
 
