@@ -66,7 +66,7 @@ DEFAULT_PARAM_SPACE = {
     "pm_reduce_pct":     (0.30, 0.80),
     "pm_add_pct":        (0.20, 0.60),
     "pm_adx_threshold":  (15, 50),
-    "pm_agg_k":          (1.0, 1.0),
+    "pm_agg_k":          (0.5, 1.0),
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -94,6 +94,7 @@ STOCKS = {
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=2, initial_capital=80000,
         data_source="tushare", atr_period=14,
+        pm_rsi_oversold=31, pm_rsi_overbought=76,
     ),
     "03690.HK": dict(  # 美团
         ts_code="03690.HK", stock_name="美团", market="HK",
@@ -103,15 +104,17 @@ STOCKS = {
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=2, initial_capital=40000,
         data_source="tushare",
+        pm_rsi_oversold=30, pm_rsi_overbought=70,
     ),
     "02015.HK": dict(  # 理想
         ts_code="02015.HK", stock_name="理想", market="HK",
         mode="position_management_1", per_shares=100,
         start_date="20210812", pm_start_date="20210909",
-        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=False,
+        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=True,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=0, initial_capital=200000,
         data_source="tushare",
+        pm_rsi_oversold=29, pm_rsi_overbought=74,
     ),
     "06181.HK": dict(  # 老铺
         ts_code="06181.HK", stock_name="老铺", market="HK",
@@ -121,6 +124,7 @@ STOCKS = {
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=3, initial_capital=40000,
         data_source="tushare",
+        pm_rsi_oversold=31, pm_rsi_overbought=85,
     ),
     "01810.HK": dict(  # 小米
         ts_code="01810.HK", stock_name="小米", market="HK",
@@ -130,6 +134,7 @@ STOCKS = {
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=6, initial_capital=30000,
         data_source="tushare",
+        pm_rsi_oversold=28, pm_rsi_overbought=76,
     ),
     # "00700.HK": dict(  # 腾讯
     #     ts_code="00700.HK", stock_name="腾讯", market="HK",
@@ -148,6 +153,7 @@ STOCKS = {
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=9, initial_capital=40000,
         data_source="tushare",
+        pm_rsi_oversold=30, pm_rsi_overbought=65,
     ),
 }
 
@@ -178,7 +184,7 @@ SWEEP_RANGES = {
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
         "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
         "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [1.0],
+        "pm_agg_k": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
     },
     "01810.HK": {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],

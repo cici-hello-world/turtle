@@ -156,37 +156,37 @@ _STOCK_GRID_CONSTANTS = {
     "09992.HK": dict(  # 泡泡玛特 — 高波动，RSI带放宽
         zone_score={"A": 1.0, "D": 0.65, "C": 0.30},
         vol_base=0.05, vol_adx_slope=600.0, vol_div=0.08,
-        rsi_oversold=25, rsi_overbought=75,
+        short_weight=0.35, di_norm=20,
     ),
     "03690.HK": dict(  # 美团 — D区+1.34% C区-0.32%，D远弱于泡泡玛特
         zone_score={"A": 1.0, "D": 0.40, "C": 0.25},
         vol_base=0.047, vol_adx_slope=1200.0, vol_div=0.028,
-        rsi_oversold=30, rsi_overbought=70,
+        short_weight=0.25, di_norm=20,
     ),
     "06181.HK": dict(  # 老铺 — A区+29% D区+7.7% C区-0.97%，极端波动
         zone_score={"A": 1.0, "D": 0.45, "C": 0.25},
         vol_base=0.061, vol_adx_slope=1200.0, vol_div=0.025,
-        rsi_oversold=20, rsi_overbought=80,
+        short_weight=0.25, di_norm=25,
     ),
     "01810.HK": dict(  # 小米 — A区+3.4% D区+1.8% C区-0.82%，与泡泡玛特格局接近
         zone_score={"A": 1.0, "D": 0.65, "C": 0.25},
         vol_base=0.040, vol_adx_slope=1200.0, vol_div=0.020,
-        rsi_oversold=30, rsi_overbought=70,
+        short_weight=0.35, di_norm=20,
     ),
     "02015.HK": dict(  # 理想 — A区-1.65% D区+0.68% C区-0.33%，DMI区制预测力弱
         zone_score={"A": 0.30, "D": 0.45, "C": 0.20},
         vol_base=0.055, vol_adx_slope=800.0, vol_div=0.035,
-        rsi_oversold=25, rsi_overbought=75,
+        short_weight=0.65, di_norm=25,
     ),
     "000625.SZ": dict(  # 长安汽车 — A区+1.62% D区-1.29% C区≈0%, DMI区分度一般、低波动
         zone_score={"A": 1.0, "D": 0.30, "C": 0.25},
         vol_base=0.0337, vol_adx_slope=1200, vol_div=0.0177,
-        rsi_oversold=30, rsi_overbought=65,
+        short_weight=0.50, di_norm=20,
     ),
     "00700.HK": dict(  # 腾讯 — A区+1.8% D区+1.0% C区+0.2%, DMI质量高、三区全正
         zone_score={"A": 1.0, "D": 0.65, "C": 0.25},
         vol_base=0.0277, vol_adx_slope=1200, vol_div=0.0098,
-        rsi_oversold=30, rsi_overbought=70,
+        short_weight=0.35, di_norm=20,
     ),
 
 }
@@ -241,6 +241,8 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
     dmi_available = area_long is not None and area_short is not None
 
     if dmi_available:
+        gc = _get_grid_constants(config.ts_code)
+
         # ── 趋势强度三因子 (0~1) ──
         adx = row.get("ADX14", 20)
         plus_di = row.get("+DI", 0)
@@ -251,8 +253,9 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
         adx_score = (min(max(adx, threshold * 0.5), threshold * 1.5) - threshold * 0.5) / threshold
         adx_score = min(max(adx_score, 0.0), 1.0)
 
-        # 2) DI 方向强度分
-        di_score = min(abs(plus_di - minus_di) / 25.0, 1.0)
+        # 2) DI 方向强度分（di_norm 个股自适应）
+        di_norm = gc.get("di_norm", 25.0)
+        di_score = min(abs(plus_di - minus_di) / di_norm, 1.0)
 
         # 3) ADX 斜率分
         adx_slope = row.get("ADX_SLOPE_5", 0.0)
@@ -265,7 +268,6 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
         # ── 波动率微调 ──
         atr = row.get("ATR", 0)
         close = row.get("Close", 0)
-        gc = _get_grid_constants(config.ts_code)
         if atr > 0 and close > 0:
             vol = atr / close
             vol_threshold = gc["vol_base"] + (adx - 30.0) / gc["vol_adx_slope"]
@@ -278,7 +280,8 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
         zone_score = gc["zone_score"]
         long_score = zone_score.get(area_long, zone_score["C"])
         short_score = zone_score.get(area_short, zone_score["C"])
-        zone_blend = max(long_score - short_score * 0.5, 0.0)
+        short_weight = gc.get("short_weight", 0.5)
+        zone_blend = max(long_score - short_score * short_weight, 0.0)
 
         # strength 在 zone_blend 基础上 ±0.1 微调
         blend = zone_blend + (strength - 0.5) * 0.15
@@ -289,14 +292,12 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
         blend = 0.5
 
     # ── RSI 超买超卖微调（叠加于 DMI 之上，±0.05）──
-    if config.pm_rsi_enabled and gc:
+    if config.pm_rsi_enabled:
         rsi = row.get("RSI14", 50.0)
         if not pd.isna(rsi):
-            rsi_os = gc.get("rsi_oversold", config.pm_rsi_oversold)
-            rsi_ob = gc.get("rsi_overbought", config.pm_rsi_overbought)
-            if rsi < rsi_os:
+            if rsi < config.pm_rsi_oversold:
                 rsi_adj = 0.05   # 超卖 → 更积极买入
-            elif rsi > rsi_ob:
+            elif rsi > config.pm_rsi_overbought:
                 rsi_adj = -0.05  # 超买 → 更保守
             else:
                 rsi_adj = 0.0
@@ -311,14 +312,12 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
     eff_reduce = round(rp_high + (rp - rp_high) * blend, 3)
 
     # ── RSI 直接调整网格参数（反映到交易记录中）──
-    if config.pm_rsi_enabled and gc:
+    if config.pm_rsi_enabled:
         rsi = row.get("RSI14", 50.0)
         if not pd.isna(rsi):
-            rsi_os = gc.get("rsi_oversold", config.pm_rsi_oversold)
-            rsi_ob = gc.get("rsi_overbought", config.pm_rsi_overbought)
-            if rsi < rsi_os:
+            if rsi < config.pm_rsi_oversold:
                 eff_down = round(eff_down * 0.7, 3)    # 超卖 → 买入门槛降低30%
-            if rsi > rsi_ob:
+            if rsi > config.pm_rsi_overbought:
                 eff_up = round(eff_up * 1.3, 3)        # 超买 → 卖出门槛降低
                 eff_reduce = round(min(eff_reduce * 1.5, 0.95), 3)  # 超买 → 减仓比例×1.5
 
@@ -1356,7 +1355,9 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             buy_trigger = close <= reference_price * (1 - eff_grid_down)
             rsi_buy = row.get("RSI14", 50.0)
             if config.pm_rsi_enabled and not pd.isna(rsi_buy) and rsi_buy > config.pm_rsi_overbought:
-                buy_trigger = False  # 超买 → 不追高
+                # 超买拦截买入仅对非best区生效：best区高RSI=趋势延续，非best区高RSI=反转信号
+                if _dmi_trend_area(row, config, "long", dmi_bl) != best_zone:
+                    buy_trigger = False
             if (buy_trigger
               and _dmi_trend_area(row, config, "short", dmi_bl) != best_zone
               and _dmi_trend_area(row, config, "long", dmi_bl) != "C"):
@@ -1450,7 +1451,12 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 # RSI 叠加：超卖阻止卖出（eff_up/eff_reduce 已含超买调整，无需重复）
                 rsi_sell = row.get("RSI14", 50.0)
                 if config.pm_rsi_enabled and not pd.isna(rsi_sell) and rsi_sell < config.pm_rsi_oversold:
-                    sell_trigger = False  # 超卖 → 不在底部割肉
+                    # 超卖拦截卖出：C区超卖=真反弹（通用）；泡泡玛特D区超卖=强反弹（个股特判）
+                    sell_area = _dmi_trend_area(row, config, "long", dmi_bl)
+                    if sell_area == "C":
+                        sell_trigger = False
+                    elif config.ts_code == "09992.HK" and sell_area == "D":
+                        sell_trigger = False
                 if sell_trigger:
                     reduce_value = equity_before * eff_reduce
                     reduce_lots = math.ceil(reduce_value / (close * ps))
