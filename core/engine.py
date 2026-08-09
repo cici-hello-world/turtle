@@ -265,17 +265,6 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
 
         strength = 0.40 * adx_score + 0.40 * di_score + 0.20 * adx_dir_score
 
-        # ── 波动率微调 ──
-        atr = row.get("ATR", 0)
-        close = row.get("Close", 0)
-        if atr > 0 and close > 0:
-            vol = atr / close
-            vol_threshold = gc["vol_base"] + (adx - 30.0) / gc["vol_adx_slope"]
-            vol_adj = (vol - vol_threshold) / gc["vol_div"]
-            vol_adj = min(max(vol_adj, -0.10), 0.10)
-        else:
-            vol_adj = 0.0
-
         # ── 双方向区制映射 ──
         zone_score = gc["zone_score"]
         long_score = zone_score.get(area_long, zone_score["C"])
@@ -285,7 +274,7 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
 
         # strength 在 zone_blend 基础上 ±0.1 微调
         blend = zone_blend + (strength - 0.5) * 0.15
-        blend = min(max(blend + vol_adj, 0.3), 0.7)
+        blend = min(max(blend, 0.3), 0.7)
     else:
         # DMI 不可用 → 中性 blend，RSI 仍可生效
         gc = _get_grid_constants(config.ts_code)
@@ -320,6 +309,14 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
             if rsi > config.pm_rsi_overbought:
                 eff_up = round(eff_up * 1.3, 3)        # 超买 → 卖出门槛降低
                 eff_reduce = round(min(eff_reduce * 1.5, 0.95), 3)  # 超买 → 减仓比例×1.5
+
+    # ── BB 宽度乘数（替代原 DMI vol_adj，只缩放网格间距，不动 eff_reduce）──
+    if config.pm_bb_enabled:
+        bb_pct = row.get("BB_Width_Pct")
+        if not pd.isna(bb_pct):
+            bb_mult = config.pm_bb_width_min + bb_pct * (config.pm_bb_width_max - config.pm_bb_width_min)
+            eff_down = round(eff_down * bb_mult, 3)
+            eff_up = round(eff_up * bb_mult, 3)
 
     return eff_down, eff_up, eff_reduce
 

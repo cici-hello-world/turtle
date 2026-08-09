@@ -90,11 +90,13 @@ STOCKS = {
         ts_code="09992.HK", stock_name="泡泡玛特", market="HK",
         mode="position_management_1", per_shares=200,
         start_date="20201211", pm_start_date="20210112",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=2, initial_capital=80000,
         data_source="tushare", atr_period=14,
         pm_rsi_oversold=31, pm_rsi_overbought=76,
+        pm_bb_enabled=True, pm_bb_period=10, pm_bb_width_lookback=252,
+        pm_bb_width_min=0.6, pm_bb_width_max=1.3,
     ),
     "03690.HK": dict(  # 美团
         ts_code="03690.HK", stock_name="美团", market="HK",
@@ -115,6 +117,8 @@ STOCKS = {
         pm_initial_shares=0, initial_capital=200000,
         data_source="tushare",
         pm_rsi_oversold=29, pm_rsi_overbought=74,
+        pm_bb_enabled=True, pm_bb_period=10, pm_bb_width_lookback=42,
+        pm_bb_width_min=0.6, pm_bb_width_max=1.5, pm_bb_k=1.5,
     ),
     "06181.HK": dict(  # 老铺
         ts_code="06181.HK", stock_name="老铺", market="HK",
@@ -125,6 +129,8 @@ STOCKS = {
         pm_initial_shares=3, initial_capital=40000,
         data_source="tushare",
         pm_rsi_oversold=31, pm_rsi_overbought=85,
+        pm_bb_enabled=True, pm_bb_period=5, pm_bb_width_lookback=126,
+        pm_bb_width_min=0.6, pm_bb_width_max=1.5,
     ),
     "01810.HK": dict(  # 小米
         ts_code="01810.HK", stock_name="小米", market="HK",

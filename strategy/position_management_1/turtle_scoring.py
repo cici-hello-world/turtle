@@ -438,6 +438,8 @@ def main():
         ema_slow=config0.ema_slow, channel_type=config0.channel_type,
         bb_period=config0.bb_period, bb_k=config0.bb_k,
         am_ma_period=config0.am_ma_period, mode=config0.mode,
+        pm_bb_period=config0.pm_bb_period, pm_bb_k=config0.pm_bb_k,
+        pm_bb_width_lookback=config0.pm_bb_width_lookback,
     )
     print(f"   数据: {len(df_base)} 条  "
           f"({df_base['Date'].iloc[0]} ~ {df_base['Date'].iloc[-1]})")

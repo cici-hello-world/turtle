@@ -328,6 +328,8 @@ def run_one_scenario(df: pd.DataFrame, config):
         bb_k=config.bb_k,
         am_ma_period=config.am_ma_period,
         mode=config.mode,
+        pm_bb_period=config.pm_bb_period, pm_bb_k=config.pm_bb_k,
+        pm_bb_width_lookback=config.pm_bb_width_lookback,
     )
     trades, equity, eq_dates = run_backtest(df, config)
     benchmark_return = round(((end_price - start_price)/start_price)*100,2)

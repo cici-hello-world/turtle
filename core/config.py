@@ -90,6 +90,14 @@ class BacktestConfig:
     pm_rsi_oversold: float = 30.0    # 超卖阈值（RSI低于此值 → 更积极买入、禁止卖出）
     pm_rsi_overbought: float = 70.0  # 超买阈值（RSI高于此值 → 禁止买入、更积极卖出）
 
+    # ========== BB 宽度自适应网格（叠加于 DMI+RSI 之上，仅缩放网格间距） ==========
+    pm_bb_enabled: bool = False      # 是否启用 BB 宽度联动网格（宽带→网格放宽，窄带→网格收紧）
+    pm_bb_period: int = 20           # BB 计算周期
+    pm_bb_k: float = 2.0             # BB 标准差倍数
+    pm_bb_width_lookback: int = 252  # BB 宽度 Z-score 归一化滚动窗口
+    pm_bb_width_min: float = 0.6     # 窄带(percentile≈0)时的网格乘数（收紧网格）
+    pm_bb_width_max: float = 1.5     # 宽带(percentile≈1)时的网格乘数（放宽网格）
+
     # ========== 止盈与回本参数 ==========
     pm_take_profit_ratio: float = 100  # 权益超过初始×该倍数后：仓位归零时停止交易，有仓位时全仓清仓
 

@@ -238,6 +238,8 @@ def prepare_scenario_dfs(last_price: float, last_date,
             bb_k=config0.bb_k,
             am_ma_period=config0.am_ma_period,
             mode=config0.mode,
+            pm_bb_period=config0.pm_bb_period, pm_bb_k=config0.pm_bb_k,
+            pm_bb_width_lookback=config0.pm_bb_width_lookback,
         )
         scenario_dfs[label] = df_sim
 
@@ -571,6 +573,8 @@ def grid_search():
         atr_period=config0.atr_period, ema_fast=config0.ema_fast, ema_slow=config0.ema_slow,
         channel_type=config0.channel_type, bb_period=config0.bb_period, bb_k=config0.bb_k,
         am_ma_period=config0.am_ma_period, mode=config0.mode,
+        pm_bb_period=config0.pm_bb_period, pm_bb_k=config0.pm_bb_k,
+        pm_bb_width_lookback=config0.pm_bb_width_lookback,
     )
     print(f"   数据行数: {len(df_base)}")
 

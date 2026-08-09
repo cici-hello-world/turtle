@@ -100,6 +100,9 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         bb_k=config.bb_k,
         am_ma_period=config.am_ma_period,
         mode=config.mode,
+        pm_bb_period=config.pm_bb_period,
+        pm_bb_k=config.pm_bb_k,
+        pm_bb_width_lookback=config.pm_bb_width_lookback,
     )
 
     # 3. 运行回测，取最后持仓状态

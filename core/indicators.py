@@ -40,6 +40,9 @@ def compute_indicators(
     bb_k: float = 2.0,
     am_ma_period: int = 0,
     mode: str = '',
+    pm_bb_period: int = 20,          # BB 宽度计算周期（仅 PM1）
+    pm_bb_k: float = 2.0,            # BB 标准差倍数（仅 PM1）
+    pm_bb_width_lookback: int = 252, # BB 宽度归一化滚动窗口（仅 PM1）
 ) -> pd.DataFrame:
     """在 DataFrame 上添加海龟策略所需指标列
 
@@ -145,6 +148,19 @@ def compute_indicators(
         avg_loss = _wilder_smooth(loss, 14)
         rs = np.where(avg_loss > 0, avg_gain / avg_loss, 100.0)
         df["RSI14"] = 100.0 - 100.0 / (1.0 + rs)
+
+        # ---- BB 宽度 Z-score 归一化（网格宽度自适应，仅 PM1 模式） ----
+        # 宽带(高波动) → pct→1 → 网格放宽；窄带(低波动/挤压) → pct→0 → 网格收紧
+        if mode == "position_management_1":
+            mid = df["Close"].rolling(window=pm_bb_period, min_periods=pm_bb_period).mean()
+            std = df["Close"].rolling(window=pm_bb_period, min_periods=pm_bb_period).std()
+            bb_width = ((mid + pm_bb_k * std) - (mid - pm_bb_k * std)) / mid
+            bb_width_ma = bb_width.rolling(window=pm_bb_width_lookback, min_periods=20).mean()
+            bb_width_sd = bb_width.rolling(window=pm_bb_width_lookback, min_periods=20).std()
+            bb_width_sd = bb_width_sd.replace(0, np.nan)  # 防止除零
+            bb_width_norm = (bb_width - bb_width_ma) / bb_width_sd
+            bb_width_norm = bb_width_norm.clip(-2, 2)
+            df["BB_Width_Pct"] = (bb_width_norm + 2) / 4  # [-2,2] → [0,1]
 
     # ── 个股 DMI 基线：自动计算，供 _dmi_trend_area 自适应分区 ──
     df.attrs["dmi_baseline"] = _compute_dmi_baseline(df)
