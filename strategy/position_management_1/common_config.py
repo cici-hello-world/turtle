@@ -114,10 +114,10 @@ STOCKS = {
         start_date="20210812", pm_start_date="20210909",
         user_dmi=True, pm_adaptive=False, pm_adaptive_grid=True,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=0, initial_capital=200000,
+        pm_initial_shares=25, initial_capital=40000,
         data_source="tushare",
-        pm_rsi_oversold=29, pm_rsi_overbought=74,
-        pm_bb_enabled=True, pm_bb_period=10, pm_bb_width_lookback=42,
+        pm_rsi_oversold=25, pm_rsi_overbought=65,
+        pm_bb_enabled=True, pm_bb_period=10, pm_bb_width_lookback=21,
         pm_bb_width_min=0.6, pm_bb_width_max=1.5, pm_bb_k=1.5,
     ),
     "06181.HK": dict(  # 老铺
@@ -130,7 +130,7 @@ STOCKS = {
         data_source="tushare",
         pm_rsi_oversold=31, pm_rsi_overbought=85,
         pm_bb_enabled=True, pm_bb_period=5, pm_bb_width_lookback=126,
-        pm_bb_width_min=0.6, pm_bb_width_max=1.5,
+        pm_bb_width_min=0.6, pm_bb_width_max=1.5,pm_bb_k=1.5,
     ),
     "01810.HK": dict(  # 小米
         ts_code="01810.HK", stock_name="小米", market="HK",

@@ -146,49 +146,39 @@ def _dmi_trend_area(row, config, direction: str = "long",
     return _trend_area
 
 
-# ── 自适应网格的个股经验常量（基于20日forward收益 + 波动率实证）──
+# ── 自适应网格的个股经验常量（基于20日forward收益实证）──
 # zone_score: A/D/C 区 → blend 映射值，越高越积极
-# vol_base: ADX=30 时的基准 ATR/Close
-# vol_adx_slope: ADX 每偏离30多少点 → vol_threshold 调 0.01（越大=越不敏感）
-# vol_div: vol_adj 归一化除数（≈该股票 vol 的 std）
-# 默认值来自 09992.HK 泡泡玛特，其他股票按需覆盖
+# short_weight: 空头方向得分权重，越大越保守
+# di_norm: DI 方向强度归一化除数
 _STOCK_GRID_CONSTANTS = {
-    "09992.HK": dict(  # 泡泡玛特 — 高波动，RSI带放宽
+    "09992.HK": dict(
         zone_score={"A": 1.0, "D": 0.65, "C": 0.30},
-        vol_base=0.05, vol_adx_slope=600.0, vol_div=0.08,
         short_weight=0.35, di_norm=20,
     ),
-    "03690.HK": dict(  # 美团 — D区+1.34% C区-0.32%，D远弱于泡泡玛特
+    "03690.HK": dict(
         zone_score={"A": 1.0, "D": 0.40, "C": 0.25},
-        vol_base=0.047, vol_adx_slope=1200.0, vol_div=0.028,
         short_weight=0.25, di_norm=20,
     ),
-    "06181.HK": dict(  # 老铺 — A区+29% D区+7.7% C区-0.97%，极端波动
+    "06181.HK": dict(
         zone_score={"A": 1.0, "D": 0.45, "C": 0.25},
-        vol_base=0.061, vol_adx_slope=1200.0, vol_div=0.025,
         short_weight=0.25, di_norm=25,
     ),
-    "01810.HK": dict(  # 小米 — A区+3.4% D区+1.8% C区-0.82%，与泡泡玛特格局接近
+    "01810.HK": dict(
         zone_score={"A": 1.0, "D": 0.65, "C": 0.25},
-        vol_base=0.040, vol_adx_slope=1200.0, vol_div=0.020,
         short_weight=0.35, di_norm=20,
     ),
-    "02015.HK": dict(  # 理想 — A区-1.65% D区+0.68% C区-0.33%，DMI区制预测力弱
+    "02015.HK": dict(
         zone_score={"A": 0.30, "D": 0.45, "C": 0.20},
-        vol_base=0.055, vol_adx_slope=800.0, vol_div=0.035,
         short_weight=0.65, di_norm=25,
     ),
-    "000625.SZ": dict(  # 长安汽车 — A区+1.62% D区-1.29% C区≈0%, DMI区分度一般、低波动
+    "000625.SZ": dict(
         zone_score={"A": 1.0, "D": 0.30, "C": 0.25},
-        vol_base=0.0337, vol_adx_slope=1200, vol_div=0.0177,
         short_weight=0.50, di_norm=20,
     ),
-    "00700.HK": dict(  # 腾讯 — A区+1.8% D区+1.0% C区+0.2%, DMI质量高、三区全正
+    "00700.HK": dict(
         zone_score={"A": 1.0, "D": 0.65, "C": 0.25},
-        vol_base=0.0277, vol_adx_slope=1200, vol_div=0.0098,
         short_weight=0.35, di_norm=20,
     ),
-
 }
 
 
