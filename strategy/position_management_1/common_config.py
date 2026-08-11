@@ -38,7 +38,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 # ═══════════════════════════════════════════════════════════════
 
 WINDOW_BARS = 252
-STEP_BARS = 5 #理想和老铺是5，其他10
+STEP_BARS = 10 #理想和老铺是5，其他10
 WARMUP = 20
 
 COMBINED_SCORE_WEIGHTS = {
@@ -106,7 +106,7 @@ STOCKS = {
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=2, initial_capital=40000,
         data_source="tushare",
-        pm_rsi_oversold=30, pm_rsi_overbought=70,
+        pm_rsi_oversold=37, pm_rsi_overbought=74,
     ),
     "02015.HK": dict(  # 理想
         ts_code="02015.HK", stock_name="理想", market="HK",
@@ -136,11 +136,13 @@ STOCKS = {
         ts_code="01810.HK", stock_name="小米", market="HK",
         mode="position_management_1", per_shares=200,
         start_date="20180709", pm_start_date="20180806",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=6, initial_capital=30000,
         data_source="tushare",
         pm_rsi_oversold=28, pm_rsi_overbought=76,
+        pm_bb_enabled=True, pm_bb_period=5, pm_bb_width_lookback=252,
+        pm_bb_width_min=0.7, pm_bb_width_max=1.15,pm_bb_k=1.5,
     ),
     # "00700.HK": dict(  # 腾讯
     #     ts_code="00700.HK", stock_name="腾讯", market="HK",
