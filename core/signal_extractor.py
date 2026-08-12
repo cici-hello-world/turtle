@@ -155,7 +155,17 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         mask = pd.to_datetime(df["Date"]) >= start_date
         reference_price = float(df.loc[mask, "Close"].iloc[0]) if mask.any() else float(today["Close"])
         last_equity = config.initial_capital + current_lots * reference_price * config.per_shares
-
+    # 参考价重置：空仓时逐日扫描收盘价，防止牛市踏空
+    if config.pm_adaptive and current_lots == 0:
+        if last is not None:
+            start_date = pd.to_datetime(last_trade_date)
+        else:
+            start_date = pd.to_datetime(config.pm_start_date)
+        mask = (pd.to_datetime(df["Date"]) > start_date) & (pd.to_datetime(df["Date"]) <= pd.to_datetime(signal_date))
+        for _, row in df[mask].iterrows():
+            day_close = row["Close"]
+            if day_close > reference_price * (1 + eff_up):
+                reference_price = day_close
     current_shares = current_lots * config.per_shares
 
     # 6.5 超额收益：策略收益 - 个股同期买入持有收益
