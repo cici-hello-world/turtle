@@ -219,76 +219,69 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
     gu = config.pm_grid_up
     rp = config.pm_reduce_pct
 
-    # 激进高减仓比例（k<1 时放大卖出比例）
-    rp_high = min(round(rp + (1 - k) * 0.5, 2), 0.95)
-
     if not config.pm_adaptive_grid:
         return gd, gu, rp
 
-    area_long = _dmi_trend_area(row, config, "long", baseline)
-    area_short = _dmi_trend_area(row, config, "short", baseline)
-
-    dmi_available = area_long is not None and area_short is not None
-
-    if dmi_available:
-        gc = _get_grid_constants(config.ts_code)
-
-        # ── 趋势强度三因子 (0~1) ──
-        adx = row.get("ADX14", 20)
-        plus_di = row.get("+DI", 0)
-        minus_di = row.get("-DI", 0)
-        threshold = config.pm_adx_threshold
-
-        # 1) ADX 强度分
-        adx_score = (min(max(adx, threshold * 0.5), threshold * 1.5) - threshold * 0.5) / threshold
-        adx_score = min(max(adx_score, 0.0), 1.0)
-
-        # 2) DI 方向强度分（di_norm 个股自适应）
-        di_norm = gc.get("di_norm", 25.0)
-        di_score = min(abs(plus_di - minus_di) / di_norm, 1.0)
-
-        # 3) ADX 斜率分
-        adx_slope = row.get("ADX_SLOPE_5", 0.0)
-        if pd.isna(adx_slope):
-            adx_slope = 0.0
-        adx_dir_score = min(max(0.3 + adx_slope * 5.0, 0.0), 1.0)
-
-        strength = 0.40 * adx_score + 0.40 * di_score + 0.20 * adx_dir_score
-
-        # ── 双方向区制映射 ──
-        zone_score = gc["zone_score"]
-        long_score = zone_score.get(area_long, zone_score["C"])
-        short_score = zone_score.get(area_short, zone_score["C"])
-        short_weight = gc.get("short_weight", 0.5)
-        zone_blend = max(long_score - short_score * short_weight, 0.0)
-
-        # strength 在 zone_blend 基础上 ±0.1 微调
-        blend = zone_blend + (strength - 0.5) * 0.15
-        blend = min(max(blend, 0.3), 0.7)
+    # 跳过插值时，直接取静态网格，无需计算 DMI/RSI blend
+    if not getattr(config, "pm_adaptive_interp", True):
+        eff_down, eff_up, eff_reduce = gd, gu, rp
     else:
-        # DMI 不可用 → 中性 blend，RSI 仍可生效
-        gc = _get_grid_constants(config.ts_code)
-        blend = 0.5
+        # 激进高减仓比例（k<1 时放大卖出比例）
+        rp_high = min(round(rp + (1 - k) * 0.5, 2), 0.95)
 
-    # ── RSI 超买超卖微调（叠加于 DMI 之上，±0.05）──
-    if config.pm_rsi_enabled:
-        rsi = row.get("RSI14", 50.0)
-        if not pd.isna(rsi):
-            if rsi < config.pm_rsi_oversold:
-                rsi_adj = 0.05   # 超卖 → 更积极买入
-            elif rsi > config.pm_rsi_overbought:
-                rsi_adj = -0.05  # 超买 → 更保守
-            else:
-                rsi_adj = 0.0
-            blend = min(max(blend + rsi_adj, 0.3), 0.7)
+        area_long = _dmi_trend_area(row, config, "long", baseline)
+        area_short = _dmi_trend_area(row, config, "short", baseline)
+        dmi_available = area_long is not None and area_short is not None
 
-    # ── 不对称插值 ──
-    # gd: blend↑ → gd↓（从 gd 插值到 gd*k，强趋势敢买回调）
-    # gu: blend↑ → gu↑（从 gu*k 插值到 gu，强趋势不轻易卖）
-    # rp: blend↑ → rp↓（从 rp_high 插值到 rp，强趋势卖得少）
-    eff_down = round(gd * k + gd * (1 - k) * (1 - blend), 3)
-    eff_up = round(gu * k + gu * (1 - k) * blend, 3)
-    eff_reduce = round(rp_high + (rp - rp_high) * blend, 3)
+        if dmi_available:
+            gc = _get_grid_constants(config.ts_code)
+
+            # ── 趋势强度三因子 (0~1) ──
+            adx = row.get("ADX14", 20)
+            plus_di = row.get("+DI", 0)
+            minus_di = row.get("-DI", 0)
+            threshold = config.pm_adx_threshold
+
+            adx_score = (min(max(adx, threshold * 0.5), threshold * 1.5) - threshold * 0.5) / threshold
+            adx_score = min(max(adx_score, 0.0), 1.0)
+
+            di_norm = gc.get("di_norm", 25.0)
+            di_score = min(abs(plus_di - minus_di) / di_norm, 1.0)
+
+            adx_slope = row.get("ADX_SLOPE_5", 0.0)
+            if pd.isna(adx_slope):
+                adx_slope = 0.0
+            adx_dir_score = min(max(0.3 + adx_slope * 5.0, 0.0), 1.0)
+
+            strength = 0.40 * adx_score + 0.40 * di_score + 0.20 * adx_dir_score
+
+            zone_score = gc["zone_score"]
+            long_score = zone_score.get(area_long, zone_score["C"])
+            short_score = zone_score.get(area_short, zone_score["C"])
+            short_weight = gc.get("short_weight", 0.5)
+            zone_blend = max(long_score - short_score * short_weight, 0.0)
+
+            blend = zone_blend + (strength - 0.5) * 0.15
+            blend = min(max(blend, 0.3), 0.7)
+        else:
+            blend = 0.5
+
+        # ── RSI 超买超卖微调（叠加于 DMI 之上，±0.05）──
+        if config.pm_rsi_enabled:
+            rsi = row.get("RSI14", 50.0)
+            if not pd.isna(rsi):
+                if rsi < config.pm_rsi_oversold:
+                    rsi_adj = 0.05
+                elif rsi > config.pm_rsi_overbought:
+                    rsi_adj = -0.05
+                else:
+                    rsi_adj = 0.0
+                blend = min(max(blend + rsi_adj, 0.3), 0.7)
+
+        # ── 不对称插值 ──
+        eff_down = round(gd * k + gd * (1 - k) * (1 - blend), 3)
+        eff_up = round(gu * k + gu * (1 - k) * blend, 3)
+        eff_reduce = round(rp_high + (rp - rp_high) * blend, 3)
 
     # ── RSI 直接调整网格参数（反映到交易记录中）──
     if config.pm_rsi_enabled:

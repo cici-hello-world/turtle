@@ -81,6 +81,7 @@ class BacktestConfig:
 
     # ========== 自适应网格参数（ADX < 25 时切换到激进参数） ==========
     pm_adaptive_grid: bool = True    # 是否启用自适应网格
+    pm_adaptive_interp: bool = True  # 不对称插值（False=跳过插值公式，RSI/BB乘数直接作用于静态网格）
     pm_adx_threshold: float = 25.0   # ADX 震荡/趋势分界线
     pm_agg_k: float = 0.6            # 震荡市激进倍数: gda=gd×k, gua=gu×k, rpa=rp+(1-k)×0.5
 
