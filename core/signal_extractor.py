@@ -29,6 +29,7 @@ class DailySignal:
     last_trade_date: str
     last_type: str
     last_shares: int
+    last_price: float
 
     # 今日 DMI
     adx: float | None
@@ -146,11 +147,13 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         last_equity = float(last.get("Equity_After", 0))
         last_type = last.get("Type", "无")
         last_shares = int(last.get("Shares", 0))
+        last_price = reference_price
     else:
         current_lots = config.pm_initial_shares
         last_trade_date = "-"
         last_type = "-"
         last_shares = "-"
+        last_price = "-"
         start_date = pd.to_datetime(config.pm_start_date)
         mask = pd.to_datetime(df["Date"]) >= start_date
         reference_price = float(df.loc[mask, "Close"].iloc[0]) if mask.any() else float(today["Close"])
@@ -234,6 +237,7 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         today_close=today_close,
         last_type=last_type,
         last_shares=last_shares,
+        last_price=last_price,
         excess_return=excess_return,
     )
 
@@ -273,7 +277,7 @@ def format_signal(s: DailySignal) -> str:
     else:
         pos = f"空仓  参考价 {s.reference_price:.2f}"
     if s.last_trade_date and s.last_trade_date != "-":
-        trade_detail = f"上次交易 {s.last_trade_date}  {s.last_type}价格{s.reference_price} 数量{s.last_shares}手"
+        trade_detail = f"上次交易 {s.last_trade_date}  {s.last_type}价格{s.last_price} 数量{s.last_shares}手"
 
     lines = [
         f"**{s.stock_name}** {s.ts_code} --{s.signal_date}收盘价 {s.today_close}",
