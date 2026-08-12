@@ -38,7 +38,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 # ═══════════════════════════════════════════════════════════════
 
 WINDOW_BARS = 252
-STEP_BARS = 5 #理想和老铺是5，其他10
+STEP_BARS = 10 #理想和老铺是5，其他10
 WARMUP = 20
 
 COMBINED_SCORE_WEIGHTS = {
@@ -91,6 +91,7 @@ STOCKS = {
         mode="position_management_1", per_shares=200,
         start_date="20201211", pm_start_date="20210112",
         user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        pm_adaptive_interp=False, pm_rsi_enabled=False,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
         pm_initial_shares=2, initial_capital=80000,
         data_source="tushare", atr_period=14,
@@ -98,16 +99,16 @@ STOCKS = {
         pm_bb_enabled=True, pm_bb_period=10, pm_bb_width_lookback=252,
         pm_bb_width_min=0.6, pm_bb_width_max=1.3,
     ),
-    "03690.HK": dict(  # 美团
-        ts_code="03690.HK", stock_name="美团", market="HK",
-        mode="position_management_1", per_shares=100,
-        start_date="20180920", pm_start_date="20181023",
-        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=2, initial_capital=40000,
-        data_source="tushare",
-        pm_rsi_oversold=37, pm_rsi_overbought=74,
-    ),
+    # "03690.HK": dict(  # 美团
+    #     ts_code="03690.HK", stock_name="美团", market="HK",
+    #     mode="position_management_1", per_shares=100,
+    #     start_date="20180920", pm_start_date="20181023",
+    #     user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
+    #     pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+    #     pm_initial_shares=2, initial_capital=40000,
+    #     data_source="tushare",
+    #     pm_rsi_oversold=37, pm_rsi_overbought=74,
+    # ),
     "02015.HK": dict(  # 理想
         ts_code="02015.HK", stock_name="理想", market="HK",
         mode="position_management_1", per_shares=100,
@@ -154,16 +155,16 @@ STOCKS = {
     #     pm_initial_shares=0, initial_capital=60000,
     #     data_source="tushare",
     # ),
-    "000625.SZ": dict(  # 长安
-        ts_code="000625.SZ", stock_name="长安", market="A",
-        mode="position_management_1", per_shares=100,
-        start_date="20160701", pm_start_date="20160729",
-        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=False,
-        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=9, initial_capital=40000,
-        data_source="tushare",
-        pm_rsi_oversold=30, pm_rsi_overbought=65,
-    ),
+    # "000625.SZ": dict(  # 长安
+    #     ts_code="000625.SZ", stock_name="长安", market="A",
+    #     mode="position_management_1", per_shares=100,
+    #     start_date="20160701", pm_start_date="20160729",
+    #     user_dmi=True, pm_adaptive=False, pm_adaptive_grid=False,
+    #     pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+    #     pm_initial_shares=9, initial_capital=40000,
+    #     data_source="tushare",
+    #     pm_rsi_oversold=30, pm_rsi_overbought=65,
+    # ),
 }
 
 # ═══════════════════════════════════════════════════════════════
