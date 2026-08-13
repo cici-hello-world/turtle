@@ -96,7 +96,7 @@ STOCK_CONFIGS = {
     ("06181.HK", "long_more"): dict(
         ts_code="06181.HK", stock_name="老铺", market="HK",
         mode="long_more", ema_fast=0, ema_slow=0, user_dmi=False,
-        start_date="20240628", don_start_date="20260122",
+        start_date="20240628", don_start_date="20240729",
         initial_capital=200000,
     ),
     ("00700.HK", "long_more"): dict(
@@ -113,6 +113,7 @@ STOCK_CONFIGS = {
     ),
 }
 from strategy.position_management_1 import common_config
+from strategy.bb_rebound import bb_config
 BASE_KWARGS = None
 BEST_PARAMS = None
 
@@ -122,10 +123,14 @@ def get_stock_config(ts_code: str, mode: str = "position_management_1") -> dict:
         global BASE_KWARGS, BEST_PARAMS
         common_config.init_config(ts_code)
         BASE_KWARGS = dict(common_config.BASE_KWARGS)  # 复制，避免污染共享配置
-        BASE_KWARGS["pm_start_date"] = "20250728"
-        # BASE_KWARGS["end_date"] = "20220731"
+        BASE_KWARGS["pm_start_date"] = "20210909"
+        # BASE_KWARGS["end_date"] = "20230628"
         BEST_PARAMS = dict(common_config.OPTIMAL_PARAMS_ACTIVE)
         return {**BASE_KWARGS, **BEST_PARAMS}
+    if mode == "bb_rebound":
+        if ts_code not in bb_config.BB_STOCKS:
+            raise KeyError(f"未配置 {ts_code} 的 bb_rebound 参数，请先在 strategy/bb_rebound/bb_config.py 中添加")
+        return dict(bb_config.BB_STOCKS[ts_code])  # 复制，避免污染共享配置
     key = (ts_code, mode)
     if key not in STOCK_CONFIGS:
         raise KeyError(f"未配置 {ts_code} mode={mode} 的回测参数，请在 STOCK_CONFIGS 中添加")

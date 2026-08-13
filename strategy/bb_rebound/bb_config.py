@@ -27,7 +27,7 @@ BB_STOCKS = {
         pm_initial_shares=25, initial_capital=40000,
         data_source="tushare",
         bb_period=30, bb_k=2.5,
-        pm_add_pct=0.30, pm_reduce_pct=0.75,
+        pm_add_pct=0.50, pm_reduce_pct=0.75,
         pm_max_position_pct=0.9, pm_min_cash_pct=0.10,
         pm_take_profit_ratio=100,
     ),
