@@ -48,7 +48,7 @@ class BacktestConfig:
     bb_k: float = 2.0               # 布林线标准差倍数（仅 bollinger）
 
     # ========== 策略模式 ==========
-    mode: str = "long_more"  # "long" | "long_more" | "short_more" | "both" | "anti_martingale" | "position_management_1" | "position_management_2"
+    mode: str = "long_more"  # "long" | "long_more" | "short_more" | "both" | "anti_martingale" | "position_management_1" | "position_management_2" | "bb_rebound"
     max_pyramid: int = 4  # 最大加仓次数（含初始仓位，Turtle 原版单一市场上限 4 单位）
     skip_first_add: bool = False  # 跳过首次加仓，总加仓次数-1（仅 long_more）
 
@@ -148,6 +148,7 @@ class BacktestConfig:
                     "both": "a_stock_both_result",
                     "anti_martingale": "a_stock_anti_martingale_result",
                     "position_management_1": "position_management_result",
+                    "bb_rebound": "bb_rebound_result",
                 }
             elif self.market == "ETF":
                 suffix_map = {
@@ -157,6 +158,7 @@ class BacktestConfig:
                     "both": "ETF_both_result",
                     "anti_martingale": "ETF_anti_martingale_result",
                     "position_management_1": "position_management_result",
+                    "bb_rebound": "bb_rebound_result",
                 }
             else:
                 suffix_map = {
@@ -166,6 +168,7 @@ class BacktestConfig:
                     "both": "hk_stock_both_result",
                     "anti_martingale": "hk_stock_anti_martingale_result",
                     "position_management_1": "position_management_result",
+                    "bb_rebound": "bb_rebound_result",
                 }
             sub_dir = suffix_map.get(self.mode, f"{self.market.lower()}_stock_backtest")
             self.output_dir = os.path.join(_RESULT_ROOT, sub_dir)

@@ -8,6 +8,7 @@
 - "anti_martingale":         反马丁格尔（MA信号 + 跨交易仓位调整）
 - "position_management_1":   仓位管理策略1（网格：参考价±N%触发买卖）
 - "position_management_2":   仓位管理策略2（Swing恢复：反弹卖出、回落买回，固定手数）
+- "bb_rebound":              布林带返弹（收盘穿破下轨加仓、穿破上轨减仓，权益百分比）
 """
 
 import copy
@@ -35,6 +36,8 @@ def run_backtest(df: pd.DataFrame, config) -> tuple[list[dict], list[float], lis
         return _run_position_management_1(df, config)
     elif config.mode == "position_management_2":
         return _run_position_management_2(df, config)
+    elif config.mode == "bb_rebound":
+        return _run_bb_rebound(df, config)
     else:
         raise ValueError(f"未知的策略模式: {config.mode}")
 
@@ -1480,6 +1483,180 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
     # 追加最终权益点（与最后一天一致，_snap 已记录）
     # 注意：循环中 _snap() 已经覆盖了最后一天，此处无需重复
     # 但如果 start_index+1 > len(df)-1（无交易日），则需保留初始点
+
+    return pm_trades, equity_curve, equity_dates
+
+
+# ==================== 布林带返弹策略 (BB Rebound) ====================
+
+def _run_bb_rebound(df: pd.DataFrame, config) -> tuple[list[dict], list[float], list]:
+    """布林带返弹策略：
+    - 从 pm_start_date 开始，持有 pm_initial_shares 手初始仓位
+    - 收盘价由上向下穿破布林下轨 → 加仓 pm_add_pct（权益%）
+    - 收盘价由下向上穿破布林上轨 → 减仓 pm_reduce_pct（权益%）
+    - 穿越信号每次只触发一次，需回到带内并再次穿出才会再次触发
+    - 仓位上限 pm_max_position_pct，现金下限 pm_min_cash_pct 防止过度加仓
+    """
+    ps = config.per_shares
+    initial_lots = config.pm_initial_shares
+    add_pct = config.pm_add_pct
+    reduce_pct = config.pm_reduce_pct
+    max_pos_pct = config.pm_max_position_pct
+    min_cash_pct = config.pm_min_cash_pct
+    take_profit = config.pm_take_profit_ratio  # 止盈回本倍数
+
+    pm_trades = []
+    capital = config.initial_capital
+    current_lots = initial_lots
+
+    # 定位起始日期
+    start_date_str = config.pm_start_date
+    if not start_date_str:
+        print("⚠️ [BB返弹] 未设置 pm_start_date，跳过")
+        return pm_trades, [config.initial_capital], []
+
+    start_date = pd.to_datetime(start_date_str)
+    df_dates = pd.to_datetime(df["Date"])
+    mask = df_dates >= start_date
+    if not mask.any():
+        print(f"⚠️ [BB返弹] 数据中没有 >= {start_date_str} 的日期，跳过")
+        return pm_trades, [config.initial_capital], []
+    start_index = int(np.argmax(mask.values))
+
+    start_row = df.iloc[start_index]
+    reference_price = float(start_row["Close"])
+
+    # 初始权益
+    initial_equity = capital + current_lots * reference_price * ps
+    equity_curve = [initial_equity]
+    equity_dates = [start_date]          # 与 equity_curve 一一对应的日期序列
+
+    def _dmi_snapshot(row):
+        """交易记录中的 DMI 状态列（缺失时补 NaN，兼容不同指标计算条件）"""
+        return {
+            "+DI": row.get("+DI", np.nan),
+            "-DI": row.get("-DI", np.nan),
+            "ADX14": row.get("ADX14", np.nan),
+            "ADXR": row.get("ADXR", np.nan),
+            "ADX_UP": row.get("ADX_UP", np.nan),
+            "ADX_CROSS_UP_ADXR": row.get("ADX_CROSS_UP_ADXR", np.nan),
+            "ADX_DOWN": row.get("ADX_DOWN", np.nan),
+            "ADX_CROSS_DOWN_ADXR": row.get("ADX_CROSS_DOWN_ADXR", np.nan),
+        }
+
+    for i in range(start_index + 1, len(df)):
+        row = df.iloc[i]
+        prev_row = df.iloc[i - 1]
+        close = float(row["Close"])
+        prev_close = float(prev_row["Close"])
+        current_date = row["Date"]
+
+        bb_lower = row.get("BB_Lower", np.nan)
+        bb_upper = row.get("BB_Upper", np.nan)
+        prev_lower = prev_row.get("BB_Lower", np.nan)
+        prev_upper = prev_row.get("BB_Upper", np.nan)
+
+        def _snap():
+            """记录当日收盘权益快照"""
+            equity_curve.append(capital + current_lots * close * ps)
+            equity_dates.append(current_date)
+
+        equity_before = capital + current_lots * close * ps
+
+        # 分红
+        if current_lots > 0:
+            _, capital = _collect_dividend(row, current_lots, ps, capital)
+
+        # ── 加仓：收盘由上向下穿破下轨 ──
+        add_trigger = (not pd.isna(bb_lower) and not pd.isna(prev_lower)
+                       and prev_close >= prev_lower and close < bb_lower)
+        if add_trigger:
+            add_value = equity_before * add_pct
+            add_lots = math.floor(add_value / (close * ps))
+            if add_lots > 0:
+                # 空仓且已回本 → 停止交易
+                if not (current_lots == 0 and equity_before > initial_equity * take_profit):
+                    # 仓位上限（静态）
+                    position_value_after = (current_lots + add_lots) * close * ps
+                    if position_value_after > equity_before * max_pos_pct:
+                        add_lots = int((equity_before * max_pos_pct) / (close * ps)) - current_lots
+
+                    if add_lots > 0:
+                        # 现金下限
+                        gross_cost = close * add_lots * ps
+                        trade_cost = _pm_trade_cost(gross_cost, config.market, "buy")
+                        total_cost = gross_cost + trade_cost
+                        cash_after = capital - total_cost
+                        if cash_after < equity_before * min_cash_pct:
+                            max_cost = capital - equity_before * min_cash_pct
+                            afford_per_lot = close * ps * (1 + (0.0012 if config.market == "HK" else 0.0006))
+                            add_lots = int(max_cost / afford_per_lot) if afford_per_lot > 0 else 0
+                        if add_lots > 0:
+                            gross_cost = close * add_lots * ps
+                            trade_cost = _pm_trade_cost(gross_cost, config.market, "buy")
+                            total_cost = gross_cost + trade_cost
+                            capital -= total_cost
+                            current_lots += add_lots
+                            reference_price = close
+
+                            equity = capital + current_lots * close * ps
+                            pm_trades.append({
+                                "Date": current_date,
+                                "Entry Date": current_date,
+                                "Exit Date": current_date,
+                                "Type": "加仓",
+                                "Price": close,
+                                "Entry Price": close,
+                                "Exit Price": close,
+                                "Shares": add_lots,
+                                "Cost_¥": trade_cost,
+                                "PnL_¥": -total_cost,
+                                "PnL_%": 0.0,
+                                "Capital_After": capital,
+                                "Reason": f"BB下轨加仓（权益{round(add_pct * 100, 2)}%）",
+                                "Amount": -total_cost,
+                                "Position_After": current_lots,
+                                "Equity_After": equity,
+                                "Reference_Price": reference_price,
+                                "more_info": [],
+                                **_dmi_snapshot(row),
+                            })
+
+        # ── 减仓：收盘由下向上穿破上轨 ──
+        reduce_trigger = (not pd.isna(bb_upper) and not pd.isna(prev_upper)
+                          and prev_close <= prev_upper and close > bb_upper
+                          and current_lots > 0)
+        if reduce_trigger:
+            reduce_value = equity_before * reduce_pct
+            reduce_lots = min(math.ceil(reduce_value / (close * ps)), current_lots)
+            if equity_before > initial_equity * take_profit:
+                # 当前已回本则全部清仓
+                reduce_lots = current_lots
+            if reduce_lots > 0:
+                gross_proceeds = close * reduce_lots * ps
+                trade_cost = _pm_trade_cost(gross_proceeds, config.market, "sell")
+                net_proceeds = gross_proceeds - trade_cost
+                capital += net_proceeds
+                current_lots -= reduce_lots
+                reference_price = close
+
+                equity = capital + current_lots * close * ps
+                pm_trades.append({
+                    "Date": current_date, "Entry Date": current_date,
+                    "Exit Date": current_date, "Type": "减仓",
+                    "Price": close, "Entry Price": close, "Exit Price": close,
+                    "Shares": reduce_lots, "Cost_¥": trade_cost,
+                    "PnL_¥": net_proceeds, "PnL_%": 0.0,
+                    "Capital_After": capital,
+                    "Reason": f"BB上轨减仓（权益{round(reduce_pct * 100, 2)}%）",
+                    "Amount": net_proceeds, "Position_After": current_lots,
+                    "Equity_After": equity, "Reference_Price": reference_price,
+                    "more_info": [],
+                    **_dmi_snapshot(row),
+                })
+
+        # 每日收盘权益快照（不论是否发生交易）
+        _snap()
 
     return pm_trades, equity_curve, equity_dates
 

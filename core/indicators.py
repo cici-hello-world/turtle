@@ -64,8 +64,8 @@ def compute_indicators(
     # ATR (Wilder 平滑，等价于海龟 N 值: N = (19×PDN + TR) / 20)
     tr_values = df["TR"].values.astype(float)
     df["ATR"] = _wilder_smooth(tr_values, atr_period)
-    # 布林线通道（仅在需要时计算）
-    if channel_type == "bollinger":
+    # 布林线通道（bollinger 通道模式或 bb_rebound 返弹策略需要）
+    if channel_type == "bollinger" or mode == "bb_rebound":
         df["BB_Mid"] = df["Close"].rolling(window=bb_period, min_periods=bb_period).mean()
         bb_std = df["Close"].rolling(window=bb_period, min_periods=bb_period).std()
         df["BB_Upper"] = df["BB_Mid"] + bb_k * bb_std

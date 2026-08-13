@@ -27,17 +27,20 @@ from datetime import datetime
 
 from core.config import BacktestConfig
 from core.notify import send as notify_send
-from core.signal_extractor import extract_signal, format_signal
+from core.signal_extractor import extract_signal, format_signal, extract_bb_signal, format_bb_signal
 
 # 导入缓存更新
 from data_cache.update_cache import main as update_cache_main
 
 
-# ── 股票配置（从 common_config 统一获取）──────────────────
+# ── 股票配置（PM1 从 common_config，bb_rebound 从 bb_config）──────────────────
 from strategy.position_management_1.common_config import STOCKS, OPTIMAL_PARAMS
+from strategy.bb_rebound.bb_config import BB_STOCKS
 
 STOCK_CONFIGS = [
-    BacktestConfig(**{**STOCKS[ts_code], **OPTIMAL_PARAMS.get(ts_code, {}), "pm_start_date": "20260801"})
+    (BacktestConfig(**{**BB_STOCKS[ts_code], "pm_start_date": "20260801"})
+     if ts_code in BB_STOCKS else
+     BacktestConfig(**{**STOCKS[ts_code], **OPTIMAL_PARAMS.get(ts_code, {}), "pm_start_date": "20260801"}))
     for ts_code in STOCKS
 ]
 
@@ -67,26 +70,29 @@ def main():
 
     # ── Step 2: 提取信号 ──
     print(f"\n📊 Step 2: 提取仓位信号\n")
-    signals = []
+    signal_blocks = []
     for config in STOCK_CONFIGS:
         # 跳过缓存失败的股票
         if config.ts_code in failed:
             print(f"  ⏭️ {config.stock_name} ({config.ts_code}) 缓存失败，跳过")
             continue
-        signal = extract_signal(config)
-        if signal:
-            signals.append(signal)
+        if config.mode == "bb_rebound":
+            signal = extract_bb_signal(config)
+            block = format_bb_signal(signal) if signal else None
+        else:
+            signal = extract_signal(config)
+            block = format_signal(signal) if signal else None
+        if block:
+            signal_blocks.append(block)
         else:
             print(f"  ❌ {config.stock_name} ({config.ts_code}) 信号提取失败")
 
-    if not signals:
+    if not signal_blocks:
         print("\n⚠️ 无有效信号")
         return
 
     # ── Step 3: 组装通知消息 ──
     print(f"\n📨 Step 3: 推送通知\n")
-
-    signal_blocks = [format_signal(s) for s in signals]
 
     body_parts = [f"## 🐢 海龟信号 {today.strftime('%Y-%m-%d')}"]
     body_parts.append("---")
