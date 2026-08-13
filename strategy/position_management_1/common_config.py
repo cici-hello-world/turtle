@@ -66,7 +66,7 @@ DEFAULT_PARAM_SPACE = {
     "pm_reduce_pct":     (0.30, 0.80),
     "pm_add_pct":        (0.20, 0.60),
     "pm_adx_threshold":  (15, 50),
-    "pm_agg_k":          (1.0, 1.0),
+    "pm_agg_k":          (0.5, 1.0),
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -99,16 +99,19 @@ STOCKS = {
         pm_bb_enabled=True, pm_bb_period=10, pm_bb_width_lookback=252,
         pm_bb_width_min=0.6, pm_bb_width_max=1.3,
     ),
-    # "03690.HK": dict(  # 美团
-    #     ts_code="03690.HK", stock_name="美团", market="HK",
-    #     mode="position_management_1", per_shares=100,
-    #     start_date="20180920", pm_start_date="20181023",
-    #     user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-    #     pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-    #     pm_initial_shares=2, initial_capital=40000,
-    #     data_source="tushare",
-    #     pm_rsi_oversold=37, pm_rsi_overbought=74,
-    # ),
+    "03690.HK": dict(  # 美团
+        ts_code="03690.HK", stock_name="美团", market="HK",
+        mode="position_management_1", per_shares=100,
+        start_date="20180920", pm_start_date="20181023",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        pm_adaptive_interp=True, pm_rsi_enabled=True,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=2, initial_capital=40000,
+        data_source="tushare",
+        pm_rsi_oversold=37, pm_rsi_overbought=74,
+        pm_bb_enabled=True, pm_bb_period=10, pm_bb_width_lookback=126,
+        pm_bb_width_min=0.75, pm_bb_width_max=1.1,pm_bb_k=1.5,
+    ),
     "02015.HK": dict(  # 理想
         ts_code="02015.HK", stock_name="理想", market="HK",
         mode="position_management_1", per_shares=100,
@@ -186,7 +189,7 @@ SWEEP_RANGES = {
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
         "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
         "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [1.0],
+        "pm_agg_k": [0.5, 0.6, 0.7, 0.8, 0.9,1.0],
     },
     "02015.HK": {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
@@ -202,7 +205,7 @@ SWEEP_RANGES = {
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
         "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
         "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [1.0],
+        "pm_agg_k": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
     },
     "06181.HK": {
         "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
