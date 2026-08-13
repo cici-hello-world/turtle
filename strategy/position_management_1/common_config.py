@@ -163,11 +163,13 @@ STOCKS = {
     #     ts_code="000625.SZ", stock_name="长安", market="A",
     #     mode="position_management_1", per_shares=100,
     #     start_date="20160701", pm_start_date="20160729",
-    #     user_dmi=True, pm_adaptive=False, pm_adaptive_grid=False,
+    #     user_dmi=True, pm_adaptive=False, pm_adaptive_grid=True,
     #     pm_dynamic_position=False, ema_fast=0, ema_slow=0,
     #     pm_initial_shares=9, initial_capital=40000,
     #     data_source="tushare",
     #     pm_rsi_oversold=30, pm_rsi_overbought=65,
+    #     pm_bb_enabled=True, pm_bb_period=20, pm_bb_width_lookback=63,
+    #     pm_bb_width_min=0.75, pm_bb_width_max=1.05,pm_bb_k=1.5,
     # ),
 }
 
