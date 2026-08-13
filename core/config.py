@@ -99,7 +99,7 @@ class BacktestConfig:
     pm_bb_width_min: float = 0.6     # 窄带(percentile≈0)时的网格乘数（收紧网格）
     pm_bb_width_max: float = 1.5     # 宽带(percentile≈1)时的网格乘数（放宽网格）
 
-    # ========== 止盈与回本参数 ==========
+    # ========== 止盈与回本参数 回测时设置100,代码不生效,实际操作时如需要可以改为对应倍数==========
     pm_take_profit_ratio: float = 100  # 权益超过初始×该倍数后：仓位归零时停止交易，有仓位时全仓清仓
 
     # ========== Position Management 2 参数（Swing 恢复仓位管理） ==========

@@ -182,37 +182,37 @@
     },
     "000625.SZ": {
       "weights": {
-        "excess": 0.3467,
-        "robust_sharpe": 0.251,
-        "r_cubed": 0.4023
+        "excess": 0.312,
+        "robust_sharpe": 0.2606,
+        "r_cubed": 0.4274
       },
       "scoring_params": {
         "excess": {
           "type": "linear_quantile",
-          "low_val": 9.127,
-          "high_val": 44.092,
+          "low_val": 9.816,
+          "high_val": 38.9745,
           "low_score": 5.0,
           "high_score": 95.0,
-          "slope": 2.5740025740025745,
-          "intercept": -18.492921492921496
+          "slope": 3.0865785277020428,
+          "intercept": -25.297854827923253
         },
         "robust_sharpe": {
           "type": "linear_quantile",
-          "low_val": -0.7,
-          "high_val": -0.24,
+          "low_val": -0.69,
+          "high_val": -0.31,
           "low_score": 5.0,
           "high_score": 95.0,
-          "slope": 195.6521739130435,
-          "intercept": 141.95652173913044
+          "slope": 236.84210526315792,
+          "intercept": 168.42105263157896
         },
         "r_cubed": {
           "type": "linear_quantile",
           "low_val": -0.23,
-          "high_val": -0.08,
+          "high_val": -0.09,
           "low_score": 5.0,
           "high_score": 95.0,
-          "slope": 599.9999999999999,
-          "intercept": 142.99999999999997
+          "slope": 642.8571428571428,
+          "intercept": 152.85714285714283
         }
       }
     }
@@ -260,11 +260,11 @@
     },
     "000625.SZ": {
       "pm_grid_down": 0.14,
-      "pm_grid_up": 0.033,
-      "pm_reduce_pct": 0.35,
-      "pm_add_pct": 0.25,
-      "pm_adx_threshold": 35,
-      "pm_agg_k": 1.0
+      "pm_grid_up": 0.028,
+      "pm_reduce_pct": 0.5,
+      "pm_add_pct": 0.4,
+      "pm_adx_threshold": 25,
+      "pm_agg_k": 0.9
     }
   }
 }

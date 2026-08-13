@@ -66,7 +66,7 @@ DEFAULT_PARAM_SPACE = {
     "pm_reduce_pct":     (0.30, 0.80),
     "pm_add_pct":        (0.20, 0.60),
     "pm_adx_threshold":  (15, 50),
-    "pm_agg_k":          (1.0, 1.0),
+    "pm_agg_k":          (0.5, 1.0),
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -159,18 +159,18 @@ STOCKS = {
     #     pm_initial_shares=0, initial_capital=60000,
     #     data_source="tushare",
     # ),
-    # "000625.SZ": dict(  # 长安
-    #     ts_code="000625.SZ", stock_name="长安", market="A",
-    #     mode="position_management_1", per_shares=100,
-    #     start_date="20160701", pm_start_date="20160729",
-    #     user_dmi=True, pm_adaptive=False, pm_adaptive_grid=True,
-    #     pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-    #     pm_initial_shares=9, initial_capital=40000,
-    #     data_source="tushare",
-    #     pm_rsi_oversold=30, pm_rsi_overbought=65,
-    #     pm_bb_enabled=True, pm_bb_period=20, pm_bb_width_lookback=63,
-    #     pm_bb_width_min=0.75, pm_bb_width_max=1.05,pm_bb_k=1.5,
-    # ),
+    "000625.SZ": dict(  # 长安
+        ts_code="000625.SZ", stock_name="长安", market="A",
+        mode="position_management_1", per_shares=100,
+        start_date="20160701", pm_start_date="20160729",
+        user_dmi=True, pm_adaptive=False, pm_adaptive_grid=True,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=9, initial_capital=40000,
+        data_source="tushare",
+        pm_rsi_oversold=30, pm_rsi_overbought=65,
+        pm_bb_enabled=True, pm_bb_period=20, pm_bb_width_lookback=63,
+        pm_bb_width_min=0.75, pm_bb_width_max=1.05,pm_bb_k=1.5,
+    ),
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -224,7 +224,7 @@ SWEEP_RANGES = {
         "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
         "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
         "pm_adx_threshold": [25, 30, 35],
-        "pm_agg_k": [1.0],
+        "pm_agg_k": [0.5, 0.6, 0.7, 0.8, 0.9,1.0],
     },
 }
 
