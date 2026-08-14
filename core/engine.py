@@ -98,18 +98,23 @@ def _dmi_trend_area(row, config, direction: str = "long",
       D区 — 无趋势震荡：ADX_SLOPE_5 ≤ slope_sep
 
     阈值来源（优先级）：
-      1. baseline 参数（来自 df.attrs["dmi_baseline"]，compute_indicators 自动计算）
-      2. 硬编码默认值（基于 09992.HK 1343天实证，与归一化 DMI 指标跨个股通用）
+      1. 行级滚动基线 DI_GAP_BL / DI_DIR_BL（compute_indicators 计算，252日滚动分位数，无前视）
+      2. baseline 的 slope_sep（来自 df.attrs["dmi_baseline"]）
+      3. 硬编码默认值（基于 09992.HK 1343天实证）
 
     direction 参数：
       "long"  → 多头需 +DI - -DI > di_dir
       "short" → 多头需 -DI - +DI > di_dir
     """
-    # ── 读取阈值：baseline 优先，否则默认 ──
+    # ── 读取阈值：行级滚动基线（无前视）优先，否则硬编码默认 ──
     bl = baseline or {}
     slope_sep = bl.get("slope_sep", -0.05)
-    di_gap = bl.get("di_gap", 10.0)
-    di_dir = bl.get("di_dir", 5.0)
+    di_gap = row.get("DI_GAP_BL", np.nan)
+    if pd.isna(di_gap):
+        di_gap = 10.0
+    di_dir = row.get("DI_DIR_BL", np.nan)
+    if pd.isna(di_dir):
+        di_dir = 5.0
 
     plus_di = row.get("+DI", np.nan)
     minus_di = row.get("-DI", np.nan)
@@ -161,6 +166,8 @@ _STOCK_GRID_CONSTANTS = {
     "03690.HK": dict(
         zone_score={"A": 1.0, "D": 0.40, "C": 0.25},
         short_weight=0.25, di_norm=20,
+        # 注：short-A 20日+3.33%/胜率58.8%看似该放开买入，但实测回测中 short-A 日
+        # 网格买入发生 0 笔（仓位上限更早生效），放开无任何影响，故维持拦截
     ),
     "06181.HK": dict(
         zone_score={"A": 1.0, "D": 0.45, "C": 0.25},
@@ -186,19 +193,19 @@ _STOCK_GRID_CONSTANTS = {
 
 
 def _get_grid_constants(ts_code: str) -> dict:
-    """获取个股自适应网格常量，未配置的股票返回默认值（09992.HK）。"""
-    return _STOCK_GRID_CONSTANTS.get(ts_code)
+    """获取个股自适应网格常量，未配置的股票直接报错（fail fast，避免静默用默认值）。"""
+    if ts_code not in _STOCK_GRID_CONSTANTS:
+        raise KeyError(f"未配置 {ts_code} 的网格常量，请先在 _STOCK_GRID_CONSTANTS 中添加")
+    return _STOCK_GRID_CONSTANTS[ts_code]
 
 
 def _get_best_zone(ts_code: str) -> str:
     """获取个股 zone_score 中权重最高的区域，用于 DMI 阻塞判断。
 
-    未配置的股票默认返回 "D"（无趋势震荡区）。
+    未配置的股票随 _get_grid_constants 直接报错。
     """
     gc = _get_grid_constants(ts_code)
-    if gc and gc.get("zone_score"):
-        return max(gc["zone_score"], key=gc["zone_score"].get)
-    return "D"
+    return max(gc["zone_score"], key=gc["zone_score"].get)
 
 
 def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[float, float, float]:
@@ -305,6 +312,21 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
             eff_up = round(eff_up * bb_mult, 3)
 
     return eff_down, eff_up, eff_reduce
+
+
+def _effective_max_pos(row, config) -> float:
+    """仓位上限：动态分档（ATR/价格）或静态 pm_max_position_pct。
+    网格买入与 Donchian 加仓共用，保证两边口径一致。"""
+    if config.pm_dynamic_position and not pd.isna(row.get("ATR", np.nan)) and row["ATR"] > 0:
+        vol = row["ATR"] / float(row["Close"])
+        if vol < config.pm_dyn_vol_1:
+            return config.pm_dyn_pos_1
+        if vol < config.pm_dyn_vol_2:
+            return config.pm_dyn_pos_2
+        if vol < config.pm_dyn_vol_3:
+            return config.pm_dyn_pos_3
+        return config.pm_dyn_pos_4
+    return config.pm_max_position_pct
 
 
 def _calc_shares(capital: float, risk_per_trade: float, stop_dist: float,
@@ -1133,16 +1155,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
     add_pct = config.pm_add_pct
     grid_up = config.pm_grid_up
     grid_down = config.pm_grid_down
-    max_pos_pct = config.pm_max_position_pct
     min_cash_pct = config.pm_min_cash_pct
-    dynamic_pos = config.pm_dynamic_position  # 动态仓位上限开关
-    dyn_v1 = config.pm_dyn_vol_1              # 波动率分档阈值
-    dyn_v2 = config.pm_dyn_vol_2
-    dyn_v3 = config.pm_dyn_vol_3
-    dyn_p1 = config.pm_dyn_pos_1              # 各档仓位上限
-    dyn_p2 = config.pm_dyn_pos_2
-    dyn_p3 = config.pm_dyn_pos_3
-    dyn_p4 = config.pm_dyn_pos_4
     take_profit = config.pm_take_profit_ratio # 止盈回本倍数
     dmi_bl = df.attrs.get("dmi_baseline")      # 个股 DMI 基线（自动适配，无需配置）
     best_zone = _get_best_zone(config.ts_code)  # 个股最优 DMI 区域（zone_score 权重最高者）
@@ -1192,8 +1205,10 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
         eff_grid_down, eff_grid_up, eff_reduce = _calc_effective_grid(row, config, dmi_bl)
 
         hh_entry = row.get("HH_Entry", np.nan)
-        # DMI + 趋势自适应（数据实证优化：A区加速+B区中继都可追涨，B区20日+6.98%优于A区+4.58%）
+        # DMI + 趋势自适应：只在 long-A（趋势确认）追涨；
+        # 旧版"B区中继可追涨"结论随分区体系简化（现仅A/C/D三区）废弃
         donchian_done = False
+        #best_zone是网格买入的实证最优区，Donchian要的是趋势确认(A区)；
         if config.pm_adaptive and close > hh_entry and _dmi_trend_area(row, config, "long", dmi_bl) == "A":
             # ---- 单边上涨趋势 → Donchian 通道：趋势跟踪，不轻易卖 ----
             # Donchian 买入：突破20日高点 + 趋势加速/中继确认 → 加仓
@@ -1246,6 +1261,9 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                     "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
                 })
                 donchian_exit_date = trades[0].get("Exit Date")
+                # 离场记录用离场日的指标行（原实现误用触发日 row）
+                exit_rows = df[df["Date"] == donchian_exit_date]
+                exit_row = exit_rows.iloc[0] if len(exit_rows) else row
                 capital = trades[0].get("Capital_After")
                 reason = trades[0].get("Reason")
                 if reason !="强制平仓": #强制平仓不记录减仓
@@ -1270,14 +1288,14 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                         "Position_After": current_lots,
                         "Equity_After": equity,
                         "Reference_Price": reference_price,
-                        "+DI": row["+DI"],
-                        "-DI": row["-DI"],
-                        "ADX14": row["ADX14"],
-                        "ADXR": row["ADXR"],
-                        "ADX_UP": row["ADX_UP"],
-                        "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
-                        "ADX_DOWN": row["ADX_DOWN"],
-                        "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
+                        "+DI": exit_row["+DI"],
+                        "-DI": exit_row["-DI"],
+                        "ADX14": exit_row["ADX14"],
+                        "ADXR": exit_row["ADXR"],
+                        "ADX_UP": exit_row["ADX_UP"],
+                        "ADX_CROSS_UP_ADXR": exit_row["ADX_CROSS_UP_ADXR"],
+                        "ADX_DOWN": exit_row["ADX_DOWN"],
+                        "ADX_CROSS_DOWN_ADXR": exit_row["ADX_CROSS_DOWN_ADXR"],
                     })
                 # 趋势反转出场 → 趋势已破，清空剩余网格仓位
                 # 止损出场 → 可能是假突破，保留网格仓位继续运作
@@ -1310,14 +1328,14 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                         "Position_After": current_lots,
                         "Equity_After": equity,
                         "Reference_Price": reference_price,
-                        "+DI": row["+DI"],
-                        "-DI": row["-DI"],
-                        "ADX14": row["ADX14"],
-                        "ADXR": row["ADXR"],
-                        "ADX_UP": row["ADX_UP"],
-                        "ADX_CROSS_UP_ADXR": row["ADX_CROSS_UP_ADXR"],
-                        "ADX_DOWN": row["ADX_DOWN"],
-                        "ADX_CROSS_DOWN_ADXR": row["ADX_CROSS_DOWN_ADXR"],
+                        "+DI": exit_row["+DI"],
+                        "-DI": exit_row["-DI"],
+                        "ADX14": exit_row["ADX14"],
+                        "ADXR": exit_row["ADXR"],
+                        "ADX_UP": exit_row["ADX_UP"],
+                        "ADX_CROSS_UP_ADXR": exit_row["ADX_CROSS_UP_ADXR"],
+                        "ADX_DOWN": exit_row["ADX_DOWN"],
+                        "ADX_CROSS_DOWN_ADXR": exit_row["ADX_CROSS_DOWN_ADXR"],
                     })
                     eq[-1] = equity
                 equity_curve.extend(eq)
@@ -1331,9 +1349,11 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             if config.pm_adaptive and current_lots == 0 and close > reference_price * (1 + eff_grid_up):
                 reference_price = close
             # 非单边上涨/下跌时网格交易买入
-            # 失效模式④修复：short C区(下跌酝酿)最危险(20日+0.52%)，不应允许买入
-            # 实证：short A/B(下跌确认,20d+0.32%/-0.23%)拦截买入；
-            # long C(趋势酝酿,20d仅+1.09%/胜46.6%)也拦截，等趋势确认后再入场
+            # 买入拦截实证（2026-08 无前视基线复测，20日forward）：
+            #  short-A(下跌确认)合并-0.22%，老铺-7.5%/小米-1.3%/理想-1.3% → 拦
+            #    （美团+3.3%例外：short-A反弹强，暂不特判）
+            #  long-C(趋势酝酿)合并+0.09%，为long三区最差 → 拦，等趋势确认后再入场
+            #  short-C 旧注释称"最危险"，新基线复测+2.65%（老铺+14.7%）已不成立，代码不拦截
             # RSI 叠加：超买阻止买入（eff_down 已含超卖调整，无需重复）
             buy_trigger = close <= reference_price * (1 - eff_grid_down)
             rsi_buy = row.get("RSI14", 50.0)
@@ -1354,18 +1374,7 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                     _snap()
                     continue
                 # 仓位上限（动态：根据波动率 ATR/价格 自动调整）
-                if dynamic_pos and not pd.isna(row["ATR"]) and row["ATR"] > 0:
-                    vol = row["ATR"] / close
-                    if vol < dyn_v1:
-                        effective_max_pos = dyn_p1    # 低波动
-                    elif vol < dyn_v2:
-                        effective_max_pos = dyn_p2    # 中波动
-                    elif vol < dyn_v3:
-                        effective_max_pos = dyn_p3    # 高波动
-                    else:
-                        effective_max_pos = dyn_p4    # 极端波动
-                else:
-                    effective_max_pos = max_pos_pct
+                effective_max_pos = _effective_max_pos(row, config)
                 position_value_after = (current_lots + add_lots) * close * ps
                 if position_value_after > equity_before * effective_max_pos:
                     add_lots = int((equity_before * effective_max_pos) / (close * ps)) - current_lots
@@ -1426,7 +1435,8 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 _snap()
             else:
                 # ---- 非单边上涨趋势 → 网格交易 ----
-                # 失效模式③修复：B区20日+6.98%优于A区+4.58%，卖出拦截从仅A区扩展到A+B
+                # 卖出拦截：long==best_zone（个股最优区，多数标的为A区）不卖，让利润跑；
+                # 旧版"扩展到A+B"随分区体系简化（现仅A/C/D三区）废弃
                 # RSI 叠加：超卖阻止卖出（不割肉），超买加大减仓比例
                 sell_trigger = (close >= reference_price * (1 + eff_grid_up)
                                 and current_lots > 0
