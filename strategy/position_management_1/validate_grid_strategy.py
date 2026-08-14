@@ -97,7 +97,6 @@ def validate_regime(df: pd.DataFrame, ts_code: str, stock_name: str, market: str
             mode="position_management_1", ts_code=ts_code, stock_name=stock_name,
             market=market, pm_start_date=ws.strftime("%Y%m%d"),
             pm_initial_shares=3 if market == "HK" else 9, initial_capital=50000,
-            pm_use_dmi=False,
         )
         r = run_single_window(df_window, config)
         r["start_date"] = ws.strftime("%Y-%m-%d")
@@ -180,7 +179,7 @@ def validate_params(df: pd.DataFrame, ts_code: str, stock_name: str, market: str
                 mode="position_management_1", ts_code=ts_code, stock_name=stock_name,
                 market=market, pm_start_date=ws.strftime("%Y%m%d"),
                 pm_initial_shares=3 if market == "HK" else 9, initial_capital=50000,
-                pm_grid_up=grid_up, pm_grid_down=grid_down, pm_use_dmi=False,
+                pm_grid_up=grid_up, pm_grid_down=grid_down,
             )
             r = run_single_window(df_window, config)
             excesses.append(r["excess_return"])
@@ -219,7 +218,6 @@ def validate_worst_case(df: pd.DataFrame, ts_code: str, stock_name: str, market:
             mode="position_management_1", ts_code=ts_code, stock_name=stock_name,
             market=market, pm_start_date=ws.strftime("%Y%m%d"),
             pm_initial_shares=3 if market == "HK" else 9, initial_capital=50000,
-            pm_use_dmi=False,
         )
         df_w = compute_indicators(df_window.copy(), channel_type="donchian",
                                    mode="position_management_1")
@@ -285,7 +283,6 @@ def validate_cash_efficiency(df: pd.DataFrame, ts_code: str, stock_name: str, ma
             mode="position_management_1", ts_code=ts_code, stock_name=stock_name,
             market=market, pm_start_date=ws.strftime("%Y%m%d"),
             pm_initial_shares=3 if market == "HK" else 9, initial_capital=50000,
-            pm_use_dmi=False,
         )
         df_w = compute_indicators(df_window.copy(), channel_type="donchian",
                                    mode="position_management_1")

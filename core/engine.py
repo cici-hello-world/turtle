@@ -59,35 +59,7 @@ def _ema_trend_ok(row, config, direction: str = "long") -> bool:
     else:
         return fast_val < slow_val
 
-def _dmi_trend_ok(row, config, direction: str = "long") -> bool:
-    """dmi 趋势过滤器。"""
-    plus_di = row.get("+DI", np.nan)
-    minus_di = row.get("-DI", np.nan)
-    adx = row.get("ADX14", np.nan)
-    adxr = row.get("ADXR", np.nan)
-    adx_up = row.get("ADX_UP", np.nan)
-    adx_down = row.get("ADX_DOWN", np.nan)
-    acua = row.get("ADX_CROSS_UP_ADXR", np.nan)
-    acda = row.get("ADX_CROSS_DOWN_ADXR", np.nan)
-    bonus = adx_up and acua
-    trend_turn_around = adx_down and not acda #趋势调头但未衰竭
-    dmi_ok = (not pd.isna(adx) and not pd.isna(plus_di)
-              and not pd.isna(minus_di) and not pd.isna(adxr)) and adx > 35 #强趋势才能入场
-    if not config.user_dmi:
-        return True
-    if dmi_ok:
-        if direction == "long":
-            is_bull_trend = (plus_di - minus_di)>5 #多头趋势
-        else:
-            is_bull_trend = plus_di < minus_di #空头趋势
-        trend_accelerating = bonus or trend_turn_around  # 强趋势
-    else:
-        is_bull_trend = False
-        trend_accelerating = False
-    return is_bull_trend and trend_accelerating
-
-def _dmi_trend_area(row, config, direction: str = "long",
-                     baseline: dict | None = None) -> str:
+def _dmi_trend_area(row, config, direction: str = "long") -> str:
     """dmi 趋势过滤器（个股自适应版）。
 
     三区定义：
@@ -97,18 +69,16 @@ def _dmi_trend_area(row, config, direction: str = "long",
       C区 — 趋势酝酿：不满足A + ADX_SLOPE_5 > slope_sep
       D区 — 无趋势震荡：ADX_SLOPE_5 ≤ slope_sep
 
-    阈值来源（优先级）：
+    阈值来源：
       1. 行级滚动基线 DI_GAP_BL / DI_DIR_BL（compute_indicators 计算，252日滚动分位数，无前视）
-      2. baseline 的 slope_sep（来自 df.attrs["dmi_baseline"]）
-      3. 硬编码默认值（基于 09992.HK 1343天实证）
+      2. 硬编码默认值（基于 09992.HK 1343天实证）；slope_sep 恒为 -0.05（归一化指标跨个股通用）
 
     direction 参数：
       "long"  → 多头需 +DI - -DI > di_dir
       "short" → 多头需 -DI - +DI > di_dir
     """
     # ── 读取阈值：行级滚动基线（无前视）优先，否则硬编码默认 ──
-    bl = baseline or {}
-    slope_sep = bl.get("slope_sep", -0.05)
+    slope_sep = -0.05  # ADX_SLOPE_5 为归一化指标，斜率分界跨个股通用
     di_gap = row.get("DI_GAP_BL", np.nan)
     if pd.isna(di_gap):
         di_gap = 10.0
@@ -208,7 +178,7 @@ def _get_best_zone(ts_code: str) -> str:
     return max(gc["zone_score"], key=gc["zone_score"].get)
 
 
-def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[float, float, float]:
+def _calc_effective_grid(row, config) -> tuple[float, float, float]:
     """根据今日 DMI 状态与波动率计算有效网格 (eff_down, eff_up, eff_reduce)。
 
     由 _run_position_management_1 和 signal_extractor 共同调用，
@@ -239,8 +209,8 @@ def _calc_effective_grid(row, config, baseline: dict | None = None) -> tuple[flo
         # 激进高减仓比例（k<1 时放大卖出比例）
         rp_high = min(round(rp + (1 - k) * 0.5, 2), 0.95)
 
-        area_long = _dmi_trend_area(row, config, "long", baseline)
-        area_short = _dmi_trend_area(row, config, "short", baseline)
+        area_long = _dmi_trend_area(row, config, "long")
+        area_short = _dmi_trend_area(row, config, "short")
         dmi_available = area_long is not None and area_short is not None
 
         if dmi_available:
@@ -657,7 +627,6 @@ def _run_long_with_pyramid(df: pd.DataFrame, config,only_one=False,current_lots 
             max_shares = shares * (config.max_pyramid - skip_offset)
 
             if (_long_entry_triggered(row, config)
-                    # and _dmi_trend_ok(row, config)
                     and _ema_trend_ok(row, config)):
                 cost = row["Close"] * shares * ps
                 trade_cost = _pm_trade_cost(cost,config.market,"buy")
@@ -1157,7 +1126,6 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
     grid_down = config.pm_grid_down
     min_cash_pct = config.pm_min_cash_pct
     take_profit = config.pm_take_profit_ratio # 止盈回本倍数
-    dmi_bl = df.attrs.get("dmi_baseline")      # 个股 DMI 基线（自动适配，无需配置）
     best_zone = _get_best_zone(config.ts_code)  # 个股最优 DMI 区域（zone_score 权重最高者）
 
     pm_trades = []
@@ -1202,14 +1170,14 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 continue
         equity_before = capital + current_lots * close * ps
 
-        eff_grid_down, eff_grid_up, eff_reduce = _calc_effective_grid(row, config, dmi_bl)
+        eff_grid_down, eff_grid_up, eff_reduce = _calc_effective_grid(row, config)
 
         hh_entry = row.get("HH_Entry", np.nan)
         # DMI + 趋势自适应：只在 long-A（趋势确认）追涨；
         # 旧版"B区中继可追涨"结论随分区体系简化（现仅A/C/D三区）废弃
         donchian_done = False
         #best_zone是网格买入的实证最优区，Donchian要的是趋势确认(A区)；
-        if config.pm_adaptive and close > hh_entry and _dmi_trend_area(row, config, "long", dmi_bl) == "A":
+        if config.pm_adaptive and close > hh_entry and _dmi_trend_area(row, config, "long") == "A":
             # ---- 单边上涨趋势 → Donchian 通道：趋势跟踪，不轻易卖 ----
             # Donchian 买入：突破20日高点 + 趋势加速/中继确认 → 加仓
             df_donchian = df.iloc[i:]
@@ -1359,11 +1327,11 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
             rsi_buy = row.get("RSI14", 50.0)
             if config.pm_rsi_enabled and not pd.isna(rsi_buy) and rsi_buy > config.pm_rsi_overbought:
                 # 超买拦截买入仅对非best区生效：best区高RSI=趋势延续，非best区高RSI=反转信号
-                if _dmi_trend_area(row, config, "long", dmi_bl) != best_zone:
+                if _dmi_trend_area(row, config, "long") != best_zone:
                     buy_trigger = False
             if (buy_trigger
-              and _dmi_trend_area(row, config, "short", dmi_bl) != best_zone
-              and _dmi_trend_area(row, config, "long", dmi_bl) != "C"):
+              and _dmi_trend_area(row, config, "short") != best_zone
+              and _dmi_trend_area(row, config, "long") != "C"):
                 add_value = equity_before * add_pct
                 add_lots = math.floor(add_value / (close * ps))
                 if add_lots <= 0:
@@ -1440,12 +1408,12 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
                 # RSI 叠加：超卖阻止卖出（不割肉），超买加大减仓比例
                 sell_trigger = (close >= reference_price * (1 + eff_grid_up)
                                 and current_lots > 0
-                                and _dmi_trend_area(row, config, "long", dmi_bl) != best_zone)
+                                and _dmi_trend_area(row, config, "long") != best_zone)
                 # RSI 叠加：超卖阻止卖出（eff_up/eff_reduce 已含超买调整，无需重复）
                 rsi_sell = row.get("RSI14", 50.0)
                 if config.pm_rsi_enabled and not pd.isna(rsi_sell) and rsi_sell < config.pm_rsi_oversold:
                     # 超卖拦截卖出：C区超卖=真反弹（通用）；泡泡玛特D区超卖=强反弹（个股特判）
-                    sell_area = _dmi_trend_area(row, config, "long", dmi_bl)
+                    sell_area = _dmi_trend_area(row, config, "long")
                     if sell_area == "C":
                         sell_trigger = False
                     elif config.ts_code == "09992.HK" and sell_area == "D":

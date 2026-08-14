@@ -51,7 +51,7 @@ class DailySignal:
     reduce_trigger: float
     reduce_lots: int
 
-    # 加仓是否被 DMI 拦截（short方向 A/B 区）
+    # 加仓是否被 DMI 拦截（short方向 A 区）
     dmi_blocked: bool
     today_close: float
 
@@ -104,6 +104,7 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         pm_bb_period=config.pm_bb_period,
         pm_bb_k=config.pm_bb_k,
         pm_bb_width_lookback=config.pm_bb_width_lookback,
+        pm_rsi_period=config.pm_rsi_period,
     )
 
     # 3. 运行回测，取最后持仓状态
@@ -123,12 +124,11 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
     plus_di = today.get("+DI")
     minus_di = today.get("-DI")
     adx_up = bool(today.get("ADX_UP", False))
-    dmi_bl = df.attrs.get("dmi_baseline")  # 个股 DMI 基线
-    dmi_area = _dmi_trend_area(today, config, baseline=dmi_bl) or "-"
+    dmi_area = _dmi_trend_area(today, config) or "-"
     is_bull = (plus_di or 0) > (minus_di or 0)
 
     # 5. 有效网格
-    eff_down, eff_up, eff_reduce = _calc_effective_grid(today, config, dmi_bl)
+    eff_down, eff_up, eff_reduce = _calc_effective_grid(today, config)
 
     # 6. 持仓状态
     if trades:
@@ -207,9 +207,9 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
             current_lots,
         )
 
-    # 9. DMI 加仓拦截：short方向 A/B 区 = 强下跌趋势，不放行加仓
-    area_short = _dmi_trend_area(today, config, "short", dmi_bl)
-    dmi_blocked = area_short in ("A", "B")
+    # 9. DMI 加仓拦截：short方向 A 区（下跌确认）= 强下跌趋势，不放行加仓
+    area_short = _dmi_trend_area(today, config, "short")
+    dmi_blocked = area_short == "A"
 
     return DailySignal(
         ts_code=config.ts_code,
@@ -380,6 +380,7 @@ def extract_bb_signal(config: BacktestConfig, end_date: str | None = None) -> BB
         pm_bb_period=config.pm_bb_period,
         pm_bb_k=config.pm_bb_k,
         pm_bb_width_lookback=config.pm_bb_width_lookback,
+        pm_rsi_period=config.pm_rsi_period,
     )
 
     # 3. 运行回测，取最后持仓状态

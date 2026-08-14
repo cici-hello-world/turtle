@@ -27,7 +27,6 @@ def rolling_backtest(
     step_days: int = 30,
     pm_initial_shares: int = 26,
     initial_capital: float = 100000,
-    pm_use_dmi=False,
 ) -> list[dict]:
     """滚动回测仓位管理策略1。
 
@@ -92,7 +91,6 @@ def rolling_backtest(
             pm_start_date=ws.strftime("%Y%m%d"),
             pm_initial_shares=pm_initial_shares,
             initial_capital=initial_capital,
-            pm_use_dmi=pm_use_dmi,
         )
         trades, equity = run_backtest(df_window, config)
 

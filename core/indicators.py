@@ -43,6 +43,7 @@ def compute_indicators(
     pm_bb_period: int = 20,          # BB 宽度计算周期（仅 PM1）
     pm_bb_k: float = 2.0,            # BB 标准差倍数（仅 PM1）
     pm_bb_width_lookback: int = 252, # BB 宽度归一化滚动窗口（仅 PM1）
+    pm_rsi_period: int = 14,         # RSI 计算周期（仅 PM1；列名保留 RSI14 兼容既有报告）
 ) -> pd.DataFrame:
     """在 DataFrame 上添加海龟策略所需指标列
 
@@ -150,8 +151,8 @@ def compute_indicators(
         delta = np.diff(close_arr, prepend=close_arr[0])
         gain = np.where(delta > 0, delta, 0.0)
         loss = np.where(delta < 0, -delta, 0.0)
-        avg_gain = _wilder_smooth(gain, 14)
-        avg_loss = _wilder_smooth(loss, 14)
+        avg_gain = _wilder_smooth(gain, pm_rsi_period)
+        avg_loss = _wilder_smooth(loss, pm_rsi_period)
         rs = np.where(avg_loss > 0, avg_gain / avg_loss, 100.0)
         df["RSI14"] = 100.0 - 100.0 / (1.0 + rs)
 
@@ -168,19 +169,4 @@ def compute_indicators(
             bb_width_norm = bb_width_norm.clip(-2, 2)
             df["BB_Width_Pct"] = (bb_width_norm + 2) / 4  # [-2,2] → [0,1]
 
-    # ── 个股 DMI 基线：自动计算，供 _dmi_trend_area 自适应分区 ──
-    df.attrs["dmi_baseline"] = _compute_dmi_baseline(df)
-
     return df
-
-
-def _compute_dmi_baseline(df: pd.DataFrame) -> dict:
-    """DMI 分区基线（存于 df.attrs，供引擎 _dmi_trend_area 读取）。
-
-    slope_sep 使用硬编码 -0.05（ADX_SLOPE_5 为归一化指标，跨个股一致）。
-    di_gap/di_dir 由 compute_indicators 写入行级滚动列 DI_GAP_BL/DI_DIR_BL
-    （252日滚动分位数，无前视），引擎逐行读取，不再使用全样本统计。
-    """
-    if "ADX_SLOPE_5" not in df.columns or df["ADX_SLOPE_5"].dropna().empty:
-        return {}
-    return {"slope_sep": -0.05}

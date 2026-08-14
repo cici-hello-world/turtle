@@ -68,7 +68,6 @@ class BacktestConfig:
     pm_grid_down: float = 0.05       # 相对参考价下跌X%触发买入
     pm_max_position_pct: float = 0.9  # 仓位上限（持仓市值/权益）
     pm_min_cash_pct: float = 0.10      # 现金下限（现金/权益）
-    pm_use_dmi: bool = False          # 是否启用 DMI 过滤器
     pm_adaptive: bool = True         # 趋势自适应：单边上涨趋势转入donchian通道
     pm_dynamic_position: bool = True  # 动态仓位上限：根据波动率(ATR/价格)自动调整 max_position_pct
     pm_dyn_vol_1: float = 0.03        # 波动率分档1：<此值为低波动

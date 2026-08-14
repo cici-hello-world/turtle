@@ -52,6 +52,7 @@ def run(config: BacktestConfig):
             pm_bb_period=config.pm_bb_period,
             pm_bb_k=config.pm_bb_k,
             pm_bb_width_lookback=config.pm_bb_width_lookback,
+            pm_rsi_period=config.pm_rsi_period,
         )
 
         # 3. 运行回测
@@ -123,7 +124,7 @@ def get_stock_config(ts_code: str, mode: str = "position_management_1") -> dict:
         global BASE_KWARGS, BEST_PARAMS
         common_config.init_config(ts_code)
         BASE_KWARGS = dict(common_config.BASE_KWARGS)  # 复制，避免污染共享配置
-        BASE_KWARGS["pm_start_date"] = "20210909"
+        BASE_KWARGS["pm_start_date"] = "20260629"
         # BASE_KWARGS["end_date"] = "20230628"
         BEST_PARAMS = dict(common_config.OPTIMAL_PARAMS_ACTIVE)
         return {**BASE_KWARGS, **BEST_PARAMS}
