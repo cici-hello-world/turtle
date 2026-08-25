@@ -30,13 +30,18 @@ from core.indicators import compute_indicators
 from core.engine import run_backtest
 from core.statistics import calc_stats
 from strategy.position_management_1 import common_config
+from strategy.bb_rebound import bb_config
 
 
 def _base_kwargs(ts_code: str) -> dict:
-    """从 common_config.STOCKS 取标的初始仓位/现金/日期，切到 bb_rebound 模式"""
-    if ts_code not in common_config.STOCKS:
-        raise KeyError(f"未配置 {ts_code}，请先在 common_config.STOCKS 中添加")
-    base = dict(common_config.STOCKS[ts_code])
+    """取标的初始仓位/现金/日期，切到 bb_rebound 模式。
+    优先 common_config.STOCKS，未配置时回退 bb_config.BB_STOCKS。"""
+    if ts_code in common_config.STOCKS:
+        base = dict(common_config.STOCKS[ts_code])
+    elif ts_code in bb_config.BB_STOCKS:
+        base = dict(bb_config.BB_STOCKS[ts_code])
+    else:
+        raise KeyError(f"未配置 {ts_code}，请先在 common_config.STOCKS 或 bb_config.BB_STOCKS 中添加")
     base.update(
         mode="bb_rebound",
         end_date="20260812",              # 只用缓存数据，不联网
@@ -157,16 +162,20 @@ def main():
     print(f"\n数据: {df['Date'].min().date()} ~ {df['Date'].max().date()} "
           f"({len(df)} 行), 买入持有基准收益 = {bench:.2f}%")
 
-    # PM1 对照基线
+    # PM1 对照基线（标的未在 common_config.STOCKS 配置时跳过）
     print(f"\n── 对照基线 ──")
-    pm1_res, pm1_params = _run_pm1_baseline(df, bench, ts_code)
     _print_row("买入持有", {"ret": bench, "excess": 0.0, "cagr": float("nan"),
                             "maxdd": float("nan"), "sharpe": float("nan"),
                             "robust_sharpe": float("nan"), "mar": float("nan"),
                             "trades": 0, "final_capital": float("nan")})
-    _print_row(f"PM1最优({pm1_params['pm_grid_down']}/{pm1_params['pm_grid_up']}/"
-               f"{pm1_params['pm_reduce_pct']})", pm1_res)
-    pm1_maxdd = pm1_res["maxdd"]
+    if ts_code in common_config.STOCKS:
+        pm1_res, pm1_params = _run_pm1_baseline(df, bench, ts_code)
+        _print_row(f"PM1最优({pm1_params['pm_grid_down']}/{pm1_params['pm_grid_up']}/"
+                   f"{pm1_params['pm_reduce_pct']})", pm1_res)
+        pm1_maxdd = pm1_res["maxdd"]
+    else:
+        print("  （该标的未在 common_config.STOCKS 配置，跳过 PM1 基线）")
+        pm1_maxdd = -100.0  # 无基线时稳健推荐不过滤
 
     # 扫描网格
     combos = [dict(zip(GRID.keys(), vals))

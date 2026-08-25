@@ -150,15 +150,21 @@ STOCKS = {
         pm_bb_enabled=True, pm_bb_period=5, pm_bb_width_lookback=252,
         pm_bb_width_min=0.7, pm_bb_width_max=1.15,pm_bb_k=1.5,
     ),
-    # "00700.HK": dict(  # 腾讯
-    #     ts_code="00700.HK", stock_name="腾讯", market="HK",
-    #     mode="position_management_1", per_shares=100,
-    #     start_date="20160701", pm_start_date="20160801",
-    #     user_dmi=True, pm_adaptive=True, pm_adaptive_grid=False,
-    #     pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-    #     pm_initial_shares=0, initial_capital=60000,
-    #     data_source="tushare",
-    # ),
+    "00700.HK": dict(  # 腾讯
+        ts_code="00700.HK", stock_name="腾讯", market="HK",
+        mode="position_management_1", per_shares=100,
+        start_date="20160704", pm_start_date="20160801",
+        user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
+        pm_adaptive_interp=True, pm_rsi_enabled=True,
+        pm_dynamic_position=False, ema_fast=0, ema_slow=0,
+        pm_initial_shares=0, initial_capital=80000,
+        data_source="tushare",
+        pm_rsi_oversold=34, pm_rsi_overbought=76,
+        # BB 自适应关闭（2026-08 实测：开 BB 收益+11.3pp，但 MaxDD -16.9%→-22.9%、
+        # 稳健夏普 0.89→0.79、MAR 0.74→0.56，风险调整后不划算）
+        pm_bb_enabled=False, pm_bb_period=20, pm_bb_width_lookback=63,
+        pm_bb_width_min=0.65, pm_bb_width_max=1.3,pm_bb_k=1.5,
+    ),
     "000625.SZ": dict(  # 长安
         ts_code="000625.SZ", stock_name="长安", market="A",
         mode="position_management_1", per_shares=100,
@@ -225,6 +231,14 @@ SWEEP_RANGES = {
         "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
         "pm_adx_threshold": [25, 30, 35],
         "pm_agg_k": [0.5, 0.6, 0.7, 0.8, 0.9,1.0],
+    },
+    "00700.HK": {
+            "pm_grid_down": [0.05, 0.07, 0.10, 0.12],
+            "pm_grid_up": [0.03, 0.04, 0.05, 0.07],
+            "pm_reduce_pct": [0.35, 0.50, 0.60, 0.75],
+            "pm_add_pct": [0.25, 0.30, 0.35, 0.40, 0.50],
+            "pm_adx_threshold": [25, 30, 35],
+            "pm_agg_k": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
     },
 }
 
@@ -362,6 +376,10 @@ _OPTIMAL_PARAMS_DEFAULT = {
         pm_grid_down=0.08, pm_grid_up=0.028, pm_reduce_pct=0.66,
         pm_add_pct=0.33, pm_adx_threshold=20, pm_agg_k=1,
     ),
+    "00700.HK": dict(  # 腾讯
+            pm_grid_down=0.07, pm_grid_up=0.05, pm_reduce_pct=0.56,
+            pm_add_pct=0.33, pm_adx_threshold=27, pm_agg_k=1,
+        ),
 }
 
 # ═══════════════════════════════════════════════════════════════

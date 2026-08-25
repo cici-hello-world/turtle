@@ -36,12 +36,18 @@ def fetch_data(ts_code: str, stock_name: str, market: str,
                 print(f"📦 [缓存不足] {stock_name}  缓存 {cache_start}~{cache_end}，"
                       f"需要 {start_date}~{end_date}")
 
+    if market == "FUT" and data_source != "akshare":
+        raise ValueError("❌ 外盘期货(如 GC)仅支持 data_source='akshare'")
+
     # ---- 从 API 获取 ----
     pro = None
     if data_source == "akshare":
-        print(f"🚀 [akshare/东财] 开始获取 {stock_name} 数据...")
+        src = "新浪外盘" if market == "FUT" else "东财"
+        print(f"🚀 [akshare/{src}] 开始获取 {stock_name} 数据...")
         if market == "A":
             df = _fetch_a_share_akshare(ts_code, start_date, end_date)
+        elif market == "FUT":
+            df = _fetch_foreign_futures_akshare(ts_code, start_date, end_date)
         elif market == "ETF":
             print("⚠️ ETF 暂不支持 akshare，回退到 tushare")
             return fetch_data(ts_code, stock_name, market,
@@ -83,16 +89,22 @@ def fetch_data(ts_code: str, stock_name: str, market: str,
         else:
             df = _fetch_hk_share(pro, ts_code, start_date, end_date)
 
-    # 检查数据完整性
-    _check_data_completeness(df, exchange, start_date, end_date)
-
-    # ---- 合并现金分红除权数据 ----
-    dividends = _fetch_dividends(pro, ts_code, market, start_date, end_date)
-    if not dividends.empty:
-        df = df.merge(dividends, on="Date", how="left")
-        df["Cash_Dividend"] = df["Cash_Dividend"].fillna(0.0)
+    # 检查数据完整性（外盘期货无对应交易日历，跳过）
+    if market == "FUT":
+        print("外盘期货：跳过交易日完整性检查")
     else:
+        _check_data_completeness(df, exchange, start_date, end_date)
+
+    # ---- 合并现金分红除权数据（外盘期货无分红） ----
+    if market == "FUT":
         df["Cash_Dividend"] = 0.0
+    else:
+        dividends = _fetch_dividends(pro, ts_code, market, start_date, end_date)
+        if not dividends.empty:
+            df = df.merge(dividends, on="Date", how="left")
+            df["Cash_Dividend"] = df["Cash_Dividend"].fillna(0.0)
+        else:
+            df["Cash_Dividend"] = 0.0
     # ----
 
     # ---- 写入缓存（合并已有数据，避免覆盖更宽日期范围） ----
@@ -302,6 +314,40 @@ def _fetch_hk_share_akshare(ts_code: str, start_date: str,
 
     df["ts_code"] = ts_code
     df["trade_date"] = pd.to_datetime(df["trade_date"])
+    df = df.sort_values("trade_date")
+
+    return _format_output(df[["ts_code", "trade_date", "open", "high", "low",
+                             "close", "vol", "amount"]])
+
+
+# ==================== 外盘期货（akshare 新浪数据源） ====================
+
+def _fetch_foreign_futures_akshare(ts_code: str, start_date: str,
+                                   end_date: str) -> pd.DataFrame:
+    """外盘期货：akshare futures_foreign_hist → 日线（如 GC=COMEX黄金期货）
+
+    数据源为新浪外盘期货，仅 OHLC 可靠（volume/position 恒为 0）。
+    ts_code 直接传 akshare 的 symbol（如 "GC"、"SI"），市场用 market="FUT"。
+    """
+    import akshare as ak
+
+    print(f"  📡 调取 akshare futures_foreign_hist(symbol={ts_code}) ...")
+    df = ak.futures_foreign_hist(symbol=ts_code)
+    if df.empty:
+        return pd.DataFrame()
+
+    # 新浪返回: date, open, high, low, close, volume, position, s, settlement
+    df = df.rename(columns={
+        "date": "trade_date", "open": "open", "high": "high",
+        "low": "low", "close": "close", "volume": "vol",
+    })
+    for col in ["open", "high", "low", "close", "vol"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    # 成交额估算：合约乘数按 100 近似（GC 每手 100 盎司）；新浪 vol 恒为 0，此处仅为格式占位
+    df["amount"] = (df["close"] * df["vol"] * 100 / 1000).round(2)
+    df["ts_code"] = ts_code
+    df["trade_date"] = pd.to_datetime(df["trade_date"])
+    df = df[(df["trade_date"] >= start_date) & (df["trade_date"] <= end_date)]
     df = df.sort_values("trade_date")
 
     return _format_output(df[["ts_code", "trade_date", "open", "high", "low",

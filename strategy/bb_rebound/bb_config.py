@@ -5,7 +5,9 @@
 （理想 02015.HK，2026-08 评估：p30/k2.5 add0.50 red0.75，
 收益率 174.1% / MaxDD -30.2%，优于 PM1 的 59.5% / -21.8%；
 长安 000625.SZ，2026-08 评估：p10/k2.0 add0.20 red0.40，
-收益率 89.0% / MaxDD -31.1%，优于 PM1 的 -13.3% / -20.0%）
+收益率 89.0% / MaxDD -31.1%，优于 PM1 的 -13.3% / -20.0%；
+中国电影 600977.SH，2026-08 评估（稳健档）：p30/k2.0 add0.50 red0.50，
+收益率 68.0% / MaxDD -34.2%，持股基准 -61.6%）
 
 用法：
     from strategy.bb_rebound.bb_config import BB_STOCKS, get_config
@@ -41,6 +43,17 @@ BB_STOCKS = {
         data_source="tushare",
         bb_period=10, bb_k=2.0,
         pm_add_pct=0.20, pm_reduce_pct=0.40,
+        pm_max_position_pct=0.9, pm_min_cash_pct=0.10,
+        pm_take_profit_ratio=100,
+    ),
+    "600977.SH": dict(  # 中国电影
+        ts_code="600977.SH", stock_name="中国电影", market="A",
+        mode="bb_rebound", per_shares=100,
+        start_date="20160809", pm_start_date="20160901",
+        pm_initial_shares=0, initial_capital=40000,
+        data_source="tushare",
+        bb_period=20, bb_k=1.5,
+        pm_add_pct=0.15, pm_reduce_pct=0.1,
         pm_max_position_pct=0.9, pm_min_cash_pct=0.10,
         pm_take_profit_ratio=100,
     ),
