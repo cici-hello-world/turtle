@@ -48,7 +48,7 @@ class BacktestConfig:
     bb_k: float = 2.0               # 布林线标准差倍数（仅 bollinger）
 
     # ========== 策略模式 ==========
-    mode: str = "long_more"  # "long" | "long_more" | "short_more" | "both" | "anti_martingale" | "position_management_1" | "position_management_2" | "bb_rebound"
+    mode: str = "long_more"  # "long" | "long_more" | "short_more" | "both" | "anti_martingale" | "position_management_1" | "position_management_2" | "bb_rebound" | "dual_ma"
     max_pyramid: int = 4  # 最大加仓次数（含初始仓位，Turtle 原版单一市场上限 4 单位）
     skip_first_add: bool = False  # 跳过首次加仓，总加仓次数-1（仅 long_more）
 
@@ -107,6 +107,10 @@ class BacktestConfig:
     pm2_bounce_up: float = 0.10      # 从近期低点反弹X%触发卖出
     pm2_buyback_down: float = 0.08   # 从卖出价回落X%触发买回（必须< bounce_up 才有利润）
     pm2_trade_lots: int = 1          # 每次交易固定手数
+
+    # ========== 双均线趋势策略参数（仅 dual_ma 模式，聚宽经典版） ==========
+    dm_fast: int = 5                # 短均线周期（金叉买入/死叉卖出）
+    dm_slow: int = 60               # 长均线周期
 
     # ========== 输出 ==========
     output_dir: str = ""  # 留空自动推导

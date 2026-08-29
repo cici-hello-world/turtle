@@ -13,6 +13,7 @@
     python scripts/backtest_by_year.py --ts-code 06181.HK -m 07 -d 29 -s 2024 -e 2025
     python scripts/backtest_by_year.py --ts-code 02015.HK -m 09 -d 09     # bb_rebound 标的自动识别
     python scripts/backtest_by_year.py --ts-code 02015.HK -m 09 -d 09 --mode position_management_1
+    python scripts/backtest_by_year.py --ts-code 00700.HK -m 08 -d 01 --mode dual_ma
 """
 
 import argparse
@@ -26,7 +27,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
 from core.config import BacktestConfig
-from backtest_entry.run_backtest import run
+from backtest_entry.run_backtest import run, STOCK_CONFIGS as RB_STOCK_CONFIGS
 from strategy.position_management_1.common_config import STOCKS, OPTIMAL_PARAMS
 from strategy.bb_rebound.bb_config import BB_STOCKS
 
@@ -51,7 +52,13 @@ def main():
         mode = "bb_rebound" if ts_code in BB_STOCKS else "position_management_1"
     else:
         mode = args.mode
-    if mode == "bb_rebound":
+    if mode == "dual_ma":
+        if (ts_code, "dual_ma") not in RB_STOCK_CONFIGS:
+            print(f"❌ 未找到 {ts_code} 的 dual_ma 配置，请在 backtest_entry/run_backtest.py 的 STOCK_CONFIGS 中添加")
+            sys.exit(1)
+        stock_cfg = dict(RB_STOCK_CONFIGS[(ts_code, "dual_ma")])
+        optimal = {}
+    elif mode == "bb_rebound":
         if ts_code not in BB_STOCKS:
             print(f"❌ 未配置 {ts_code} 的 bb_rebound 参数，请先在 strategy/bb_rebound/bb_config.py 中添加")
             sys.exit(1)
@@ -112,13 +119,16 @@ def main():
             print("❌ 文件未生成")
             continue
 
-        # 读取 Summary 和 仓位管理明细
+        # 读取 Summary 和交易明细（无交易的年度报告不含交易明细 sheet）
         try:
             summary_df = pd.read_excel(report_file, sheet_name="Summary")
-            trades_df = pd.read_excel(report_file, sheet_name=trade_sheet)
         except Exception as ex:
-            print(f"❌ 读取失败: {ex}")
+            print(f"❌ 读取 Summary 失败: {ex}")
             continue
+        try:
+            trades_df = pd.read_excel(report_file, sheet_name=trade_sheet)
+        except Exception:
+            trades_df = pd.DataFrame()
 
         # 提取关键指标
         sdict = dict(zip(summary_df["指标"], summary_df["数值"]))

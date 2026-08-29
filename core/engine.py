@@ -38,6 +38,8 @@ def run_backtest(df: pd.DataFrame, config) -> tuple[list[dict], list[float], lis
         return _run_position_management_2(df, config)
     elif config.mode == "bb_rebound":
         return _run_bb_rebound(df, config)
+    elif config.mode == "dual_ma":
+        return _run_dual_ma(df, config)
     else:
         raise ValueError(f"未知的策略模式: {config.mode}")
 
@@ -1463,6 +1465,145 @@ def _run_position_management_1(df: pd.DataFrame, config) -> tuple[list[dict], li
     # 但如果 start_index+1 > len(df)-1（无交易日），则需保留初始点
 
     return pm_trades, equity_curve, equity_dates
+
+
+# ==================== 双均线趋势策略 (Dual MA，聚宽经典版) ====================
+
+def _run_dual_ma(df: pd.DataFrame, config) -> tuple[list[dict], list[float], list]:
+    """双均线趋势策略（聚宽经典版）：
+    - 短均线上穿长均线（金叉）→ 全仓买入
+    - 短均线下穿长均线（死叉）→ 清仓
+    - 全仓进出，无仓位管理；起始日取 pm_start_date（未设置则等慢线预热完成）
+    """
+    ps = config.per_shares
+    fast = config.dm_fast
+    slow = config.dm_slow
+    if fast <= 0 or slow <= 0 or fast >= slow:
+        raise ValueError(f"双均线参数非法: dm_fast={fast}, dm_slow={slow} (需 0<fast<slow)")
+
+    trades = []
+    capital = config.initial_capital
+    current_lots = 0
+    total_cost = 0.0
+    cumulative_div = 0.0
+    equity_curve = []
+    equity_dates = []
+
+    ma_fast = df["Close"].rolling(fast).mean()
+    ma_slow = df["Close"].rolling(slow).mean()
+
+    # 起始索引：pm_start_date 优先，否则慢线预热完成
+    if config.pm_start_date:
+        start_dt = pd.to_datetime(config.pm_start_date)
+        mask = pd.to_datetime(df["Date"]) >= start_dt
+        if not mask.any():
+            print("⚠️ [双均线] 数据中没有 >= pm_start_date 的日期，跳过")
+            return trades, [config.initial_capital], []
+        start_index = int(np.argmax(mask.values))
+    else:
+        start_index = slow - 1
+
+    for i in range(start_index, len(df)):
+        row = df.iloc[i]
+        close = float(row["Close"])
+        current_date = row["Date"]
+        f = float(ma_fast.iloc[i])
+        s = float(ma_slow.iloc[i])
+        if pd.isna(f) or pd.isna(s):
+            equity_curve.append(capital + current_lots * close * ps)
+            equity_dates.append(current_date)
+            continue
+        prev_f = float(ma_fast.iloc[i - 1])
+        prev_s = float(ma_slow.iloc[i - 1])
+        prev_valid = not (pd.isna(prev_f) or pd.isna(prev_s))
+
+        if current_lots > 0:
+            div_income, capital = _collect_dividend(row, current_lots, ps, capital)
+            cumulative_div += div_income
+
+        if current_lots == 0:
+            # 金叉：短线上穿长线 → 全仓买入
+            if prev_valid and f > s and prev_f <= prev_s:
+                lots = int(capital / (close * ps))
+                while lots > 0:
+                    gross = close * lots * ps
+                    trade_cost = _pm_trade_cost(gross, config.market, "buy")
+                    if gross + trade_cost <= capital:
+                        break
+                    lots -= 1
+                if lots > 0:
+                    gross = close * lots * ps
+                    trade_cost = _pm_trade_cost(gross, config.market, "buy")
+                    total = gross + trade_cost
+                    capital -= total
+                    current_lots = lots
+                    total_cost = total
+                    cumulative_div = 0.0
+                    equity = capital + current_lots * close * ps
+                    trades.append({
+                        "Date": current_date, "Entry Date": current_date,
+                        "Exit Date": current_date, "Type": "加仓",
+                        "Price": close, "Entry Price": close, "Exit Price": close,
+                        "Shares": lots, "Cost_¥": trade_cost,
+                        "PnL_¥": -total, "PnL_%": 0.0,
+                        "Capital_After": capital,
+                        "Reason": f"金叉买入(MA{fast}>MA{slow})",
+                        "Amount": -total, "Position_After": current_lots,
+                        "Equity_After": equity, "Reference_Price": close,
+                    })
+        else:
+            # 死叉：短线下穿长线 → 清仓
+            if prev_valid and f < s and prev_f >= prev_s:
+                sold_lots = current_lots
+                gross = close * sold_lots * ps
+                trade_cost = _pm_trade_cost(gross, config.market, "sell")
+                net = gross - trade_cost
+                pnl = net - total_cost + cumulative_div
+                capital += net
+                current_lots = 0
+                total_cost = 0.0
+                cumulative_div = 0.0
+                equity = capital
+                trades.append({
+                    "Date": current_date, "Entry Date": current_date,
+                    "Exit Date": current_date, "Type": "减仓",
+                    "Price": close, "Entry Price": close, "Exit Price": close,
+                    "Shares": sold_lots, "Cost_¥": trade_cost,
+                    "PnL_¥": pnl,
+                    "PnL_%": (pnl / total_cost * 100) if total_cost > 0 else 0.0,
+                    "Capital_After": capital,
+                    "Reason": f"死叉卖出(MA{fast}<MA{slow})",
+                    "Amount": net, "Position_After": 0,
+                    "Equity_After": equity, "Reference_Price": close,
+                })
+
+        equity_curve.append(capital + current_lots * close * ps)
+        equity_dates.append(current_date)
+
+    # 期末强制平仓
+    if current_lots > 0:
+        last = df.iloc[-1]
+        close = float(last["Close"])
+        gross = close * current_lots * ps
+        trade_cost = _pm_trade_cost(gross, config.market, "sell")
+        net = gross - trade_cost
+        pnl = net - total_cost + cumulative_div
+        capital += net
+        trades.append({
+            "Date": last["Date"], "Entry Date": last["Date"],
+            "Exit Date": last["Date"], "Type": "减仓",
+            "Price": close, "Entry Price": close, "Exit Price": close,
+            "Shares": current_lots, "Cost_¥": trade_cost,
+            "PnL_¥": pnl,
+            "PnL_%": (pnl / total_cost * 100) if total_cost > 0 else 0.0,
+            "Capital_After": capital,
+            "Reason": "强制平仓",
+            "Amount": net, "Position_After": 0,
+            "Equity_After": capital, "Reference_Price": close,
+        })
+        equity_curve[-1] = capital
+
+    return trades, equity_curve, equity_dates
 
 
 # ==================== 布林带返弹策略 (BB Rebound) ====================
