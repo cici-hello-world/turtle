@@ -1547,7 +1547,7 @@ def _run_dual_ma(df: pd.DataFrame, config) -> tuple[list[dict], list[float], lis
                         "Shares": lots, "Cost_¥": trade_cost,
                         "PnL_¥": -total, "PnL_%": 0.0,
                         "Capital_After": capital,
-                        "Reason": f"金叉买入(MA{fast}>MA{slow})",
+                        "Reason": f"买入(MA{fast}>MA{slow})",
                         "Amount": -total, "Position_After": current_lots,
                         "Equity_After": equity, "Reference_Price": close,
                     })
@@ -1572,7 +1572,7 @@ def _run_dual_ma(df: pd.DataFrame, config) -> tuple[list[dict], list[float], lis
                     "PnL_¥": pnl,
                     "PnL_%": (pnl / total_cost * 100) if total_cost > 0 else 0.0,
                     "Capital_After": capital,
-                    "Reason": f"死叉卖出(MA{fast}<MA{slow})",
+                    "Reason": f"卖出(MA{fast}<MA{slow})",
                     "Amount": net, "Position_After": 0,
                     "Equity_After": equity, "Reference_Price": close,
                 })
