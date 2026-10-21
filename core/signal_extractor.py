@@ -167,7 +167,8 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         mask = (pd.to_datetime(df["Date"]) > start_date) & (pd.to_datetime(df["Date"]) <= pd.to_datetime(signal_date))
         for _, row in df[mask].iterrows():
             day_close = row["Close"]
-            if day_close > reference_price * (1 + eff_up):
+            _, eff_up_row, _ = _calc_effective_grid(row, config)
+            if day_close > reference_price * (1 + eff_up_row):
                 reference_price = day_close
     current_shares = current_lots * config.per_shares
 
