@@ -148,6 +148,12 @@ def extract_signal(config: BacktestConfig) -> DailySignal | None:
         last_type = last.get("Type", "无")
         last_shares = int(last.get("Shares", 0))
         last_price = reference_price
+        # 如果more_info不为空，则last_price取more_info里面的More Date最大的More Price，last_trade_date取More Date
+        if last.get("more_info"):
+            more_info = last.get("more_info")
+            latest = max(more_info, key=lambda m: str(m.get("More Date", "")))
+            last_price = float(latest.get("More Price", last_price))
+            last_trade_date = str(pd.to_datetime(latest.get("More Date", last_trade_date)))[:10]
     else:
         current_lots = config.pm_initial_shares
         last_trade_date = "-"
