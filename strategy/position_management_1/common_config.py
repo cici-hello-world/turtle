@@ -157,7 +157,7 @@ STOCKS = {
         user_dmi=True, pm_adaptive=True, pm_adaptive_grid=True,
         pm_adaptive_interp=True, pm_rsi_enabled=True,
         pm_dynamic_position=False, ema_fast=0, ema_slow=0,
-        pm_initial_shares=0, initial_capital=80000,
+        pm_initial_shares=0, initial_capital=120000,
         data_source="tushare",
         pm_rsi_oversold=34, pm_rsi_overbought=76,
         # BB 自适应关闭（2026-08 实测：开 BB 收益+11.3pp，但 MaxDD -16.9%→-22.9%、
