@@ -321,12 +321,15 @@ st.altair_chart(style_altair(line_chart(
 
 # --- Excel 下载 ---
 wb = engine.build_excel(cfg, records)
-buf = io.BytesIO()
-wb.save(buf)
-st.download_button(
-    "下载 Excel 报表（含逐年资产负债表）", buf.getvalue(),
-    "家庭资产负债表.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+if wb is None:
+    st.warning("未安装 openpyxl，无法生成 Excel（请检查 requirements.txt）")
+else:
+    buf = io.BytesIO()
+    wb.save(buf)
+    st.download_button(
+        "下载 Excel 报表（含逐年资产负债表）", buf.getvalue(),
+        "家庭资产负债表.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 with st.expander("模型假设说明", expanded=False):
     st.markdown("""
