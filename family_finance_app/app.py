@@ -12,6 +12,7 @@
 import io
 import os
 import sys
+from datetime import datetime
 
 import altair as alt
 import pandas as pd
@@ -35,6 +36,32 @@ SURFACE = "#fcfcfb"
 
 ITEMS = ("现金", "房产", "定投基金", "股票", "有息负债")
 ASSETS = ("现金", "房产", "定投基金", "股票")
+
+# 意见反馈：默认追加写入本地 CSV；上线后如需云端收集，
+# 把 FEEDBACK_WEBHOOK 设为接收 POST 的服务地址（金数据/问卷星/自建接口均可）
+FEEDBACK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feedback.csv")
+FEEDBACK_WEBHOOK = ""
+
+
+def save_feedback(text):
+    """把反馈追加写入本地 CSV；配置了 webhook 时同时上报。"""
+    if not text or not text.strip():
+        return False
+    row = {"时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+           "反馈": text.strip()}
+    df = pd.DataFrame([row])
+    if not os.path.exists(FEEDBACK_FILE):
+        df.to_csv(FEEDBACK_FILE, index=False, encoding="utf-8-sig")
+    else:
+        df.to_csv(FEEDBACK_FILE, mode="a", header=False, index=False,
+                  encoding="utf-8-sig")
+    if FEEDBACK_WEBHOOK:
+        try:
+            import requests
+            requests.post(FEEDBACK_WEBHOOK, json=row, timeout=5)
+        except Exception:
+            pass
+    return True
 
 
 def net(b):
@@ -135,53 +162,42 @@ st.title("家庭资产十年推演")
 st.caption("输入资产负债表、收入、支出与投资参数，推演未来资产增长。"
            "数据仅在本机计算，不会上传；全部参数可随时调整，结果实时更新。")
 
-D = engine.CONFIG  # 默认值取命令行脚本的当前配置
-
 with st.expander("① 第0期资产负债表", expanded=True):
     c = st.columns(5)
-    cash0 = c[0].number_input("现金", value=float(D["现金"]), step=10000.0)
-    house0 = c[1].number_input("房产", value=float(D["房产"]), step=10000.0)
-    sp0 = c[2].number_input("定投基金", value=float(D["定投基金"]), step=10000.0)
-    stock0 = c[3].number_input("股票", value=float(D["股票"]), step=10000.0)
-    debt0 = c[4].number_input("有息负债(剩余本金)", value=float(D["有息负债"]),
-                              step=10000.0)
+    cash0 = c[0].number_input("现金", value=0.0, step=10000.0)
+    house0 = c[1].number_input("房产", value=0.0, step=10000.0)
+    sp0 = c[2].number_input("定投基金", value=0.0, step=10000.0)
+    stock0 = c[3].number_input("股票", value=0.0, step=10000.0)
+    debt0 = c[4].number_input("有息负债(剩余本金)", value=0.0, step=10000.0)
     c = st.columns(4)
-    loan_rate_pct = c[0].number_input("贷款年利率(%)", 0.0, 10.0,
-                                      float(D["贷款年利率"]) * 100, 0.1)
-    loan_months = c[1].number_input("贷款剩余期数(月)", 0, 360,
-                                    int(D["贷款剩余期数_月"]), 12)
-    loan_mode = c[2].selectbox("贷款类型", ["等额本息", "等额本金"],
-                               index=0 if D.get("贷款类型", "等额本息") == "等额本息" else 1)
-    years = c[3].slider("推演年数", 1, 30, int(D["年数"]))
+    loan_rate_pct = c[0].number_input("贷款年利率(%)", 0.0, 10.0, 0.0, 0.1)
+    loan_months = c[1].number_input("贷款剩余期数(月)", 0, 360, 0, 12)
+    loan_mode = c[2].selectbox("贷款类型", ["等额本息", "等额本金"], index=0)
+    years = c[3].slider("推演年数", 1, 30, 10)
 
 with st.expander("② 收入与支出（元）(现金流入流出)", expanded=True):
     c = st.columns(5)
-    salary = c[0].number_input("月薪(税后)", value=float(D["月薪"]), step=1000.0)
-    gjj = c[1].number_input("公积金(每年)", value=float(D["公积金"]), step=10000.0)
-    bonus = c[2].number_input("年终奖(每年)", value=float(D["年终奖"]), step=10000.0)
-    bonus_month = c[3].number_input("年终奖月份", 1, 12, int(D["年终奖月份"]))
-    gjj_month = c[4].number_input("公积金提取月份", 1, 12, int(D["公积金月份"]))
+    salary = c[0].number_input("月薪(税后)", value=0.0, step=1000.0)
+    gjj = c[1].number_input("公积金(每年)", value=0.0, step=10000.0)
+    bonus = c[2].number_input("年终奖(每年)", value=0.0, step=10000.0)
+    bonus_month = c[3].number_input("年终奖月份", 1, 12, 1)
+    gjj_month = c[4].number_input("公积金提取月份", 1, 12, 1)
     c = st.columns(2)
-    living = c[0].number_input("每月生活费", value=float(D["每月生活费"]), step=500.0)
-    social = c[1].number_input("每月社保", value=float(D["每月社保"]), step=100.0)
+    living = c[0].number_input("每月生活费", value=0.0, step=500.0)
+    social = c[1].number_input("每月社保", value=0.0, step=100.0)
 
 with st.expander("③ 投资参数", expanded=True):
     c = st.columns(5)
-    dca1 = c[0].number_input("基金定投-第1年每月", value=float(D["定投基金定投_第1年每月"]),
-                             step=1000.0)
-    dca2 = c[1].number_input("基金定投-第2年起每月", value=float(D["定投基金定投_第2年起每月"]),
-                             step=1000.0)
-    r_pct = c[2].slider("定投基金 年化收益率 R(%)", 0.0, 20.0, float(D["R"]) * 100, 0.1)
-    stock_ret_pct = c[3].number_input("股票年收益率(%)", -50.0, 50.0,
-                                      float(D["股票年收益率"]) * 100, 0.5)
-    house_gain_pct = c[4].number_input("房产年涨幅(%)", -10.0, 20.0,
-                                       float(D["房产年涨幅"]) * 100, 0.5)
+    dca1 = c[0].number_input("基金定投-第1年每月", value=0.0, step=1000.0)
+    dca2 = c[1].number_input("基金定投-第2年起每月", value=0.0, step=1000.0)
+    r_pct = c[2].slider("定投基金 年化收益率 R(%)", 0.0, 20.0, 0.0, 0.1)
+    stock_ret_pct = c[3].number_input("股票年收益率(%)", -50.0, 50.0, 0.0, 0.5)
+    house_gain_pct = c[4].number_input("房产年涨幅(%)", -10.0, 20.0, 0.0, 0.5)
 
 with st.expander("④ 高级设置（保险 / 一次性开支 / 生活费调整）", expanded=False):
     st.write("**保险月份明细**：按月份缴纳，未列出的月份为 0。")
     insurance_df = st.data_editor(
-        pd.DataFrame([{"月份": m, "金额": v}
-                      for m, v in sorted(D["保险月份明细"].items())]),
+        pd.DataFrame(columns=["月份", "金额"]),
         num_rows="dynamic", key="insurance_editor", width="stretch")
     st.write("**一次性开支**：指定期数+月份的一笔额外支出（如第1期6月装修支出 100,000）。")
     one_off_df = st.data_editor(
@@ -320,3 +336,18 @@ with st.expander("模型假设说明", expanded=False):
 - 股票收益、房产涨幅按输入的年度比率计算；一次性开支与生活费调整按高级设置执行
 - 所有投资增值均为账面浮盈，不产生现金流入
 """)
+
+# ---------------------------------------------------------------------------
+# 意见反馈（侧边栏）
+# ---------------------------------------------------------------------------
+
+with st.sidebar:
+    st.markdown("---")
+    st.subheader("意见反馈")
+    st.caption("欢迎提出新需求或问题。")
+    feedback_text = st.text_area("反馈内容", height=110, key="feedback_text")
+    if st.button("提交反馈", key="feedback_submit"):
+        if save_feedback(feedback_text):
+            st.success("感谢反馈！已记录。")
+        else:
+            st.warning("反馈内容为空，请填写后再提交。")
