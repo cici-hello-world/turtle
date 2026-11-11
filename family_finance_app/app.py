@@ -24,6 +24,13 @@ import family_balance_sheet as engine
 
 st.set_page_config(page_title="家庭资产十年推演", page_icon="🏠", layout="wide")
 
+# 隐藏右上角指向 GitHub 仓库的徽标链接（Streamlit Cloud 部署时显示）
+st.markdown("""
+<style>
+[data-testid="stToolbar"] a[href*="github.com"] { display: none !important; }
+</style>
+""", unsafe_allow_html=True)
+
 # ---------------------------------------------------------------------------
 # 图表样式：分类调色板（固定槽位 1-6，色盲安全）、浅色面墨色规范
 # ---------------------------------------------------------------------------
