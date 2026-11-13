@@ -6,11 +6,14 @@
 输入第0期（期初）资产负债表的初始值，以及每年的收入与支出，
 逐月模拟现金流，输出第1期（一年后）资产负债表各科目的余额。
 
-科目：现金、房产、定投基金、股票、有息负债（公积金贷款，20年期，支持等额本息/等额本金）
+科目：现金、房产、定投基金、股票、投资类保险、公积金、有息负债（公积金贷款，20年期，支持等额本息/等额本金）
 
 模拟假设
 --------
-- 收入：月薪（每月）、年终奖（每年一次）、公积金（每年一次，按配置月份提取入现金）
+- 收入：月薪（每月）、年终奖（每年一次）、公积金（自0期记账月次月起按月缴存，
+  按配置月份提取入现金，额度 = min(可提取额度, 账户余额)，
+  缺省：冲贷关 = 当年月供合计（第1期）/ 前12个月实付月供之和（第2期起）、
+  冲贷开 = 0；无贷款时不提取）
 - 支出：每月生活费、月供（由贷款本金/利率/剩余期数推算）、每月社保、
   保险（按月份明细缴纳：1月8400、4月3000、6月7000、9月3000）
 - 支持一次性开支（指定期数+月份）与生活费调整（自指定期数+月份起变为新值），
@@ -18,7 +21,11 @@
 - 定投基金：每月定投（从现金转入，月末买入、当月不计收益），持仓按月复利，
   复合年化收益率 R（变量，自行输入）；第1年每月25,000，第2年起每月5,000
 - 股票：收益暂定为 0，持仓不变；房产：默认不增值（可设年涨幅）
-- 公积金不单列科目，按年提取后计入「现金」
+- 公积金单列「公积金」科目：自0期记账月次月起每月按「每月缴存公积金」缴存入账户，
+  按配置月份提取入现金（额度 = min(可提取额度, 账户余额)，无贷款时不提取；
+  提取在当月月供抵扣之后进行，缺省额度：冲贷关 = 当年月供合计（第1期）
+  / 前12个月实付月供之和（第2期起）、冲贷开 = 0）；
+  开启「公积金冲贷」时，每月月供先用公积金账户余额抵扣
 
 用法
 ----
@@ -40,6 +47,9 @@ CONFIG = {
     "房产":    700000.0, #2140000.0
     "定投基金":  0,
     "股票":     410000.0, #340000.0
+    "投资类保险": 0,        # 投资类保险资产（与「保险月份明细」的保费支出相互独立）
+    "公积金账户": 0,        # 公积金账户余额（按月缴存，按年提取入现金/冲抵月供）
+    "0期记账月份": 1,       # 第0期资产负债表的记账月份（1-12），用于计算提取月账户余额
     "有息负债": 0,        # 公积金贷款剩余本金800000.0
 
     # ============ 贷款参数 ============
@@ -49,7 +59,9 @@ CONFIG = {
 
     # ============ 收入 ============
     "月薪":     11000.0,          # 元/月
-    "公积金":   60000,           # 元/年
+    "公积金冲贷": False,          # True：每月月供先用公积金账户余额抵扣
+    "每月缴存公积金": 5000.0,       # 元/月，缴存入公积金账户
+    "可提取公积金(每年)": None,     # 元/年；None：缺省=上一年总还款额（冲贷开时为0，无贷款不提取）
     "年终奖":   60000.0,         # 元/年
     "年终奖月份": 1,              # 年终奖发放月份（1-12）
     "公积金月份": 5,             # 公积金每年提取月份（1-12），该月全额提取入现金
@@ -76,12 +88,25 @@ CONFIG = {
     "R": 0.074,                    # 定投基金 复合年化收益率（变量，自行输入）
     "股票年收益率": 0.0,           # 暂定为 0
     "房产年涨幅":  0.0,           # 默认不增值
+    "保险年收益率": 0.0,           # 投资类保险资产的年化收益率
 
     # ============ 其他 ============
     "年数": 10,                     # 模拟年数（依次输出第1期…第N期）
     "excel输出路径": None,           # None：输出到脚本所在目录 scripts/家庭资产负债表.xlsx
     "现金流期数": 10,              # 非 None 时输出该期月度现金流表和曲线图，如 3
 }
+
+# 资产负债表科目：(配置键, 显示名)
+BALANCE_ITEMS = (
+    ("现金", "现金"),
+    ("房产", "房产"),
+    ("定投基金", "定投基金"),
+    ("股票", "股票"),
+    ("投资类保险", "投资类保险"),
+    ("公积金账户", "公积金"),
+    ("有息负债", "有息负债"),
+)
+BALANCE_ASSETS = ("现金", "房产", "定投基金", "股票", "投资类保险", "公积金账户")
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +154,24 @@ def repay_one_month(balance, payment, monthly_rate):
     return balance - principal_part, interest, principal_part
 
 
+def year_mortgage_total(loan, loan_mode, payment, principal_per_month, r_loan):
+    """推算当年 12 个月的月供合计（贷款提前还清则按实际结束）。"""
+    bal = loan
+    total = 0.0
+    for _ in range(12):
+        if bal <= 0.0:
+            break
+        if loan_mode == "等额本金":
+            interest = bal * r_loan
+            principal_part = min(principal_per_month, bal)
+            total += principal_part + interest
+            bal -= principal_part
+        else:
+            total += payment
+            bal, _, _ = repay_one_month(bal, payment, r_loan)
+    return total
+
+
 def validate(cfg):
     if 1.0 + cfg["R"] <= 0.0:
         raise ValueError("R 必须大于 -100%")
@@ -136,7 +179,7 @@ def validate(cfg):
         raise ValueError("有息负债大于 0 时，贷款剩余期数_月必须大于 0")
     if cfg.get("贷款类型", "等额本息") not in ("等额本金", "等额本息"):
         raise ValueError("贷款类型必须是「等额本金」或「等额本息」")
-    for key in ("年终奖月份", "公积金月份"):
+    for key in ("年终奖月份", "公积金月份", "0期记账月份"):
         if not 1 <= cfg[key] <= 12:
             raise ValueError("{} 必须在 1-12 之间".format(key))
     for month in cfg["保险月份明细"]:
@@ -168,14 +211,13 @@ def print_balance_sheet(year, prev, curr):
           + pad_cjk_r("第{}期".format(year), 18)
           + pad_cjk_r("变动", 18))
     print("-" * 64)
-    for name in ("现金", "房产", "定投基金", "股票", "有息负债"):
-        print(pad_cjk(name, 10)
-              + "{:>18,.2f}".format(prev[name])
-              + "{:>18,.2f}".format(curr[name])
-              + "{:>18,.2f}".format(curr[name] - prev[name]))
-    assets = ("现金", "房产", "定投基金", "股票")
-    net0 = sum(prev[n] for n in assets) - prev["有息负债"]
-    net1 = sum(curr[n] for n in assets) - curr["有息负债"]
+    for key, label in BALANCE_ITEMS:
+        print(pad_cjk(label, 10)
+              + "{:>18,.2f}".format(prev[key])
+              + "{:>18,.2f}".format(curr[key])
+              + "{:>18,.2f}".format(curr[key] - prev[key]))
+    net0 = sum(prev[n] for n in BALANCE_ASSETS) - prev["有息负债"]
+    net1 = sum(curr[n] for n in BALANCE_ASSETS) - curr["有息负债"]
     print("-" * 64)
     print(pad_cjk("净资产", 10)
           + "{:>18,.2f}".format(net0)
@@ -200,6 +242,8 @@ def print_cashflow(inc, exp, mortgage, dca_total, net_cash):
     if exp.get("一次性", 0.0):
         money_row("  一次性", exp["一次性"])
     money_row("  月供", mortgage["月供"])
+    if mortgage.get("公积金冲抵", 0.0):
+        money_row("    其中公积金冲抵", mortgage["公积金冲抵"])
     money_row("    其中利息", mortgage["利息"])
     money_row("    其中本金", mortgage["本金"])
     money_row("  合计", expense_total)
@@ -269,7 +313,9 @@ def plot_cashflow_curve(year, months, path):
     grid = "#e1e0d9"       # 网格线
     axis = "#c3c2b7"       # 轴线 / 零线
 
-    x = [m["月份"] for m in months]
+    # x 轴按模拟顺序编号（月份可能回绕，如 …11、12、1），刻度显示对应日历月份
+    x = list(range(1, len(months) + 1))
+    month_labels = [str(m["月份"]) for m in months]
     fig, ax = plt.subplots(figsize=(10, 5.2))
     fig.patch.set_facecolor(surface)
     ax.set_facecolor(surface)
@@ -289,7 +335,8 @@ def plot_cashflow_curve(year, months, path):
                  fontsize=14, fontweight="bold", loc="left", pad=12)
     ax.set_xlabel("月份", color=muted)
     ax.set_ylabel("金额（元）", color=muted)
-    ax.set_xticks(range(1, 13))
+    ax.set_xticks(x)
+    ax.set_xticklabels(month_labels)
     ax.tick_params(colors=muted)
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
@@ -310,12 +357,14 @@ def plot_cashflow_curve(year, months, path):
 # Excel 输出
 # ---------------------------------------------------------------------------
 
-def build_excel(cfg, records):
+def build_excel(cfg, records, flow=None):
     """构建资产负债表的 Excel 工作簿（供保存到文件或内存下载）。
 
     第 1 个 sheet 为「汇总」（科目 × 各期期末值），
     之后每期一个 sheet（科目、期初、期末、变动）。
     records: [(year, prev, curr), ...]
+    flow: 可选，{"year": 期数, "monthly": 月度明细, "entry": 该期年度汇总}，
+          提供时额外生成「第N期现金流」sheet（月度明细 + 全年现金流汇总）。
     返回 openpyxl Workbook；未安装 openpyxl 时返回 None。
     """
     try:
@@ -326,8 +375,8 @@ def build_excel(cfg, records):
         print("⚠ 未安装 openpyxl，跳过 Excel 输出（pip3 install openpyxl）")
         return None
 
-    items = ("现金", "房产", "定投基金", "股票", "有息负债")
-    assets = ("现金", "房产", "定投基金", "股票")
+    items = BALANCE_ITEMS
+    assets = BALANCE_ASSETS
     money_fmt = "#,##0.00"
     thin = Side(style="thin", color="999999")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -352,13 +401,13 @@ def build_excel(cfg, records):
         cell.fill = header_fill
         cell.border = border
         cell.alignment = Alignment(horizontal="center")
-    for r, name in enumerate(items, start=3):
-        ws.cell(row=r, column=1, value=name).border = border
-        cell = ws.cell(row=r, column=2, value=records[0][1][name])
+    for r, (key, label) in enumerate(items, start=3):
+        ws.cell(row=r, column=1, value=label).border = border
+        cell = ws.cell(row=r, column=2, value=records[0][1][key])
         cell.number_format = money_fmt
         cell.border = border
         for c, (_, _, curr) in enumerate(records, start=3):
-            cell = ws.cell(row=r, column=c, value=curr[name])
+            cell = ws.cell(row=r, column=c, value=curr[key])
             cell.number_format = money_fmt
             cell.border = border
     r_net = 3 + len(items) + 1          # 空一行后放净资产
@@ -391,10 +440,10 @@ def build_excel(cfg, records):
             cell.fill = header_fill
             cell.border = border
             cell.alignment = Alignment(horizontal="center")
-        for r, name in enumerate(items, start=3):
-            ws.cell(row=r, column=1, value=name).border = border
+        for r, (key, label) in enumerate(items, start=3):
+            ws.cell(row=r, column=1, value=label).border = border
             for c, v in enumerate(
-                    (prev[name], curr[name], curr[name] - prev[name]), start=2):
+                    (prev[key], curr[key], curr[key] - prev[key]), start=2):
                 cell = ws.cell(row=r, column=c, value=v)
                 cell.number_format = money_fmt
                 cell.border = border
@@ -412,12 +461,107 @@ def build_excel(cfg, records):
         for c in range(2, 5):
             ws.column_dimensions[get_column_letter(c)].width = 18
 
+    # ---------- 所选期现金流量表 sheet ----------
+    if flow:
+        fy = flow["year"]
+        monthly = flow["monthly"]
+        e = flow["entry"]
+        ws = wb.create_sheet("第{}期现金流".format(fy))
+        ws.cell(row=1, column=1,
+                value="第 {} 期现金流量表（单位：元）".format(fy)).font = title_font
+        mh = ["月份", "收入", "支出", "定投", "净现金流", "月末现金"]
+        for c, name in enumerate(mh, start=1):
+            cell = ws.cell(row=2, column=c, value=name)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border
+            cell.alignment = Alignment(horizontal="center")
+        for i, m in enumerate(monthly):
+            r = 3 + i
+            for c, v in enumerate((m["月份"], m["收入"], m["支出"], m["定投"],
+                                  m["净现金流"], m["月末现金"]), start=1):
+                cell = ws.cell(row=r, column=c, value=v)
+                if c > 1:
+                    cell.number_format = money_fmt
+                cell.border = border
+        r_total = 3 + len(monthly)
+        totals = ["合计"] + [sum(m[k] for m in monthly)
+                             for k in ("收入", "支出", "定投", "净现金流")] \
+            + [monthly[-1]["月末现金"]]
+        for c, v in enumerate(totals, start=1):
+            cell = ws.cell(row=r_total, column=c, value=v)
+            if c > 1:
+                cell.number_format = money_fmt
+            cell.font = header_font
+            cell.fill = net_fill
+            cell.border = border
+
+        # 全年现金流汇总（放在 H/I 列，避开左侧月度表的列宽）
+        r = r_total + 2
+        ws.cell(row=r, column=8, value="全年现金流汇总").font = header_font
+        r += 1
+        for c, name in ((8, "项目"), (9, "金额(元)")):
+            cell = ws.cell(row=r, column=c, value=name)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border
+            cell.alignment = Alignment(horizontal="center")
+        r += 1
+
+        def put(label, value=None, bold=False, fill=None):
+            nonlocal r
+            c1 = ws.cell(row=r, column=8, value=label)
+            c1.border = border
+            if bold:
+                c1.font = header_font
+            if fill:
+                c1.fill = fill
+            if value is not None:
+                c2 = ws.cell(row=r, column=9, value=value)
+                c2.number_format = money_fmt
+                c2.border = border
+                if bold:
+                    c2.font = header_font
+                if fill:
+                    c2.fill = fill
+            r += 1
+
+        inc, exp, mortgage = e["inc"], e["exp"], e["mortgage"]
+        income_total = sum(inc.values())
+        expense_total = sum(exp.values()) + mortgage["月供"]
+        put("收入", bold=True)
+        put("  月薪", inc["月薪"])
+        put("  公积金(年提取)", inc["公积金"])
+        put("  年终奖", inc["年终奖"])
+        put("  合计", income_total, bold=True, fill=net_fill)
+        put("支出", bold=True)
+        put("  生活费", exp["生活费"])
+        put("  社保", exp["社保"])
+        put("  保险", exp["保险"])
+        if exp.get("一次性", 0.0):
+            put("  一次性", exp["一次性"])
+        put("  月供", mortgage["月供"])
+        if mortgage.get("公积金冲抵", 0.0):
+            put("    其中公积金冲抵", mortgage["公积金冲抵"])
+        put("    其中利息", mortgage["利息"])
+        put("    其中本金", mortgage["本金"])
+        put("  合计", expense_total, bold=True, fill=net_fill)
+        put("资金转移", bold=True)
+        put("  定投转入定投基金", e["dca_total"])
+        put("现金净变动(期末-期初)", e["net_cash"], bold=True, fill=net_fill)
+
+        ws.column_dimensions["A"].width = 8
+        for c in range(2, 7):
+            ws.column_dimensions[get_column_letter(c)].width = 14
+        ws.column_dimensions["H"].width = 24
+        ws.column_dimensions["I"].width = 16
+
     return wb
 
 
-def write_excel(cfg, records, path):
+def write_excel(cfg, records, path, flow=None):
     """把每期资产负债表写入 Excel 文件（命令行输出用）。"""
-    wb = build_excel(cfg, records)
+    wb = build_excel(cfg, records, flow)
     if wb is None:
         return None
     wb.save(path)
@@ -445,8 +589,9 @@ def run_simulation(cfg):
     r_sp = (1.0 + cfg["R"]) ** (1.0 / 12.0) - 1.0      # 定投基金 月化收益率
     r_loan = cfg["贷款年利率"] / 12.0                    # 贷款月利率
 
-    cash, house, sp500, stocks, loan = (
-        cfg["现金"], cfg["房产"], cfg["定投基金"], cfg["股票"], cfg["有息负债"])
+    cash, house, sp500, stocks, ins_invest, gjj_acct, loan = (
+        cfg["现金"], cfg["房产"], cfg["定投基金"], cfg["股票"],
+        cfg.get("投资类保险", 0.0), cfg.get("公积金账户", 0.0), cfg["有息负债"])
     payment = monthly_payment(loan, cfg["贷款年利率"], cfg["贷款剩余期数_月"])
     loan_mode = cfg.get("贷款类型", "等额本息")
     loan_months = cfg["贷款剩余期数_月"]
@@ -455,24 +600,34 @@ def run_simulation(cfg):
     principal_per_month = (loan / loan_months) if (loan > 0.0 and loan_months > 0) else 0.0
 
     prev = {"现金": cash, "房产": house, "定投基金": sp500,
-            "股票": stocks, "有息负债": loan}
+            "股票": stocks, "投资类保险": ins_invest, "公积金账户": gjj_acct,
+            "有息负债": loan}
     records = []                     # 每期资产负债表，用于 Excel 输出
     monthly_by_year = {}             # 每年 12 个月的现金流明细，用于曲线输出
     yearly = []                      # 每年现金流汇总，供报表打印
+    mortgage_history = []            # 每月实付月供，用于「前12个月月供之和」
 
     for year in range(1, years + 1):
         inc = {"月薪": 0.0, "公积金": 0.0, "年终奖": 0.0}
         exp = {"生活费": 0.0, "社保": 0.0, "保险": 0.0, "一次性": 0.0}
-        mortgage = {"月供": 0.0, "本金": 0.0, "利息": 0.0}
+        mortgage = {"月供": 0.0, "本金": 0.0, "利息": 0.0,
+                    "现金支付": 0.0, "公积金冲抵": 0.0}
         dca_total = 0.0
         dca_monthly = (cfg["定投基金定投_第1年每月"] if year == 1
                        else cfg["定投基金定投_第2年起每月"])
         monthly = []                 # 当期 12 个月的现金流明细
+        # 当年月供合计（按贷款计划推算，公积金提取额度上限）
+        annual_mortgage = year_mortgage_total(loan, loan_mode, payment,
+                                              principal_per_month, r_loan)
 
-        for month in range(1, 13):
+        # 自 0期记账月份 的次月起循环 12 个日历月（超过 12 月时回绕到 1 月）
+        start_month = cfg["0期记账月份"]
+        for offset in range(12):
+            month = (start_month + offset) % 12 + 1
             salary = cfg["月薪"]
             bonus = cfg["年终奖"] if month == cfg["年终奖月份"] else 0.0
-            gjj = cfg["公积金"] if month == cfg["公积金月份"] else 0.0  # 按年提取入现金
+            # 缴存自0期记账月次月起：模拟自0期次月开始，故每个月均缴存
+            gjj_acct += cfg.get("每月缴存公积金", 0.0)
             living = cfg["每月生活费"]
             for (sy, sm), new_living in cfg["生活费调整"]:   # 自指定期+月起生效
                 if (year, month) >= (sy, sm):
@@ -481,9 +636,10 @@ def run_simulation(cfg):
             insurance = cfg["保险月份明细"].get(month, 0.0)
             one_off = cfg["一次性开支"].get((year, month), 0.0)
 
-            cash += salary + bonus + gjj
+            cash += salary + bonus
 
             mortgage_paid = 0.0
+            covered = 0.0
             if loan > 0.0:
                 if loan_mode == "等额本金":
                     interest = loan * r_loan
@@ -493,10 +649,36 @@ def run_simulation(cfg):
                 else:                       # 等额本息
                     mortgage_paid = payment
                     loan, interest, principal_part = repay_one_month(loan, payment, r_loan)
-                cash -= mortgage_paid
+                # 公积金冲贷：月供先用公积金账户余额抵扣
+                covered = min(gjj_acct, mortgage_paid) if cfg.get("公积金冲贷", False) else 0.0
+                gjj_acct -= covered
+                cash -= mortgage_paid - covered
                 mortgage["月供"] += mortgage_paid
+                mortgage["现金支付"] += mortgage_paid - covered
+                mortgage["公积金冲抵"] += covered
                 mortgage["利息"] += interest
                 mortgage["本金"] += principal_part
+            mortgage_history.append(mortgage_paid)
+
+            # 公积金按年提取：当月月供抵扣之后再进行（无贷款时不提取）
+            # 额度 = min(可提取额度, 账户余额)；缺省：冲贷关 = 当年月供合计（第1期）
+            # / 前12个月实付月供之和（第2期起），冲贷开 = 0
+            gjj_withdraw = 0.0
+            if month == cfg["公积金月份"] and annual_mortgage > 0.0:
+                cap = cfg.get("可提取公积金(每年)")
+                if cfg.get("公积金冲贷", False):
+                    cap = 0.0                        # 冲贷开：不额外提取
+                elif year == 1:
+                    # 第1期：优先用手动指定额度；自动（None）时用当年预估全年月供合计
+                    if cap is None:
+                        cap = annual_mortgage
+                else:
+                    # 第2期起：按前 12 个月实际月供之和自动计算
+                    cap = sum(mortgage_history[-12:])
+                # 无论哪种来源都不能超过账户余额（也不能为负）
+                gjj_withdraw = min(max(float(cap), 0.0), gjj_acct)
+                gjj_acct -= gjj_withdraw
+                cash += gjj_withdraw
 
             cash -= living + social + insurance + one_off
 
@@ -506,16 +688,16 @@ def run_simulation(cfg):
             cash -= dca_monthly
 
             inc["月薪"] += salary
-            inc["公积金"] += gjj
+            inc["公积金"] += gjj_withdraw
             inc["年终奖"] += bonus
             exp["生活费"] += living
             exp["社保"] += social
             exp["保险"] += insurance
             exp["一次性"] += one_off
 
-            # 月度现金流明细（用于曲线输出）
-            income_m = salary + bonus + gjj
-            expense_m = living + social + insurance + mortgage_paid + one_off
+            # 月度现金流明细（用于曲线输出，均为现金口径）
+            income_m = salary + bonus + gjj_withdraw
+            expense_m = living + social + insurance + (mortgage_paid - covered) + one_off
             monthly.append({
                 "月份": month,
                 "收入": income_m,
@@ -527,12 +709,14 @@ def run_simulation(cfg):
 
         monthly_by_year[year] = monthly
 
-        # 年度末：房产、股票增值（股票默认 0）
+        # 年度末：房产、股票、投资类保险增值（默认 0）
         house *= 1.0 + cfg["房产年涨幅"]
         stocks *= 1.0 + cfg["股票年收益率"]
+        ins_invest *= 1.0 + cfg.get("保险年收益率", 0.0)
 
         curr = {"现金": cash, "房产": house, "定投基金": sp500,
-                "股票": stocks, "有息负债": loan}
+                "股票": stocks, "投资类保险": ins_invest, "公积金账户": gjj_acct,
+                "有息负债": loan}
         records.append((year, prev.copy(), curr.copy()))
         yearly.append({
             "year": year,
@@ -578,7 +762,12 @@ def simulate(cfg):
     else:
         money_row("月供(等额本息)", payment)
     text_row("贷款剩余期数", "{} 月".format(cfg["贷款剩余期数_月"]))
-    text_row("公积金", "{} 月提取 {:,} 元入现金".format(cfg["公积金月份"], cfg["公积金"]))
+    text_row("公积金冲贷", "是" if cfg.get("公积金冲贷", False) else "否")
+    gjj_cap = cfg.get("可提取公积金(每年)")
+    text_row("公积金", "0期记账{}月；每月缴存 {:,}；{} 月提取（额度 {}）".format(
+        cfg.get("0期记账月份", 1), cfg.get("每月缴存公积金", 0.0), cfg["公积金月份"],
+        "{:,.0f} 元".format(gjj_cap) if gjj_cap is not None
+        else "默认=前12个月月供之和(冲贷开为0)"))
     if cfg["一次性开支"]:
         text_row("一次性开支", "; ".join(
             "第{}期{}月 {:,}".format(y, m, v)
@@ -599,15 +788,15 @@ def simulate(cfg):
             print()
             print("⚠ 第 {} 期末现金为负，请检查收支是否平衡".format(entry["year"]))
 
-    path = cfg.get("excel输出路径") or os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "家庭资产负债表.xlsx")
-    write_excel(cfg, res["records"], path)
-
-    # 月度现金流曲线：输入期数，输出该期的月度现金流表和曲线图
+    # 月度现金流：输入期数，输出该期的月度现金流表、曲线图，并写入 Excel
+    flow = None
     flow_year = cfg.get("现金流期数")
     if flow_year is not None:
         flow_year = int(flow_year)
         if 1 <= flow_year <= years:
+            flow = {"year": flow_year,
+                    "monthly": res["monthly_by_year"][flow_year],
+                    "entry": res["yearly"][flow_year - 1]}
             print_monthly_cashflow(flow_year, res["monthly_by_year"][flow_year])
             png_path = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),
@@ -616,6 +805,10 @@ def simulate(cfg):
         else:
             print()
             print("⚠ 现金流期数 {} 超出模拟范围 1-{}，已跳过".format(flow_year, years))
+
+    path = cfg.get("excel输出路径") or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "家庭资产负债表.xlsx")
+    write_excel(cfg, res["records"], path, flow=flow)
 
 
 if __name__ == "__main__":
